@@ -1,34 +1,83 @@
-# docker-compose.yml - Solo la aplicación, sin servicios de BD
+# docker-compose.yml - Configuración para Podman con PostgreSQL existente
 version: '3.8'
 
 services:
+  # ==========================================
+  # APLICACIÓN PRINCIPAL
+  # ==========================================
   app:
     build: .
     container_name: evento-speaker-assistant
     ports:
       - "7860:7860"  # Aplicación Gradio
       - "8000:8000"  # Métricas Prometheus
-    environment:
-      - APP_TITLE=Evento Speaker Assistant 🎤
-      - CONFIG_FILE=config.yaml
-      - DB_TYPE=FAISS  # O cambia por REDIS/PGVECTOR/ELASTIC si usas BD externa
-      - TIMEOUT=60
-      - PROMETHEUS_PORT=8000
-      - DEBUG=true
     env_file:
       - .env
+    environment:
+      # Usar el nombre exacto del contenedor PostgreSQL de tu sistema
+      - PGVECTOR_HOST=rag-llm-embedding_postgres-source_1
+      - PGVECTOR_PORT=5432
     volumes:
-      - ./config.yaml:/app/config.yaml
+      - ./config.yaml:/app/config.yaml:ro
       - ./assets:/app/assets
-      - ./data:/app/data
+      - ./data:/app/data:ro
       - ./logs:/app/logs
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: unless-stopped
+    # Conectar a la red donde está PostgreSQL (sin extra_hosts)
     networks:
       - evento-network
+      - rag-llm-embedding_default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-# Red para la aplicación
+  # ==========================================
+  # REDIS (opcional, para cache de aplicación)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: evento-speaker-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"  # Puerto diferente para evitar conflictos
+    volumes:
+      - redis_data:/data
+    networks:
+      - evento-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - cache  # Solo se ejecuta si especificas --profile cache
+
+# ==========================================
+# VOLÚMENES PERSISTENTES
+# ==========================================
+volumes:
+  redis_data:
+    driver: local
+
+# ==========================================
+# REDES
+# ==========================================
 networks:
   evento-network:
     driver: bridge
+  # Red externa donde está PostgreSQL (debe existir)
+  rag-llm-embedding_default:
+    external: true
+
+# ==========================================
+# NOTAS IMPORTANTES
+# ==========================================
+# 1. La aplicación se conecta a rag-llm-embedding_postgres-source_1:5432
+# 2. Usa la red externa rag-llm-embedding_default donde está PostgreSQL
+# 3. Los embeddings ya están poblados por otro proyecto
+# 4. Esta app solo CONSUME los embeddings para RAG
+# 5. Redis es opcional, solo para cache de aplicación
+# 6. NO usar extra_hosts con Podman - usar nombres de contenedor directamente

@@ -1,4 +1,4 @@
-from langchain.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings 
 from langchain.prompts import PromptTemplate
 import os
 from langchain.chains import RetrievalQA
@@ -10,422 +10,302 @@ from vector_db.db_provider_factory import FAISS, DBFactory
 
 db_factory = DBFactory()
 
-# MODIFICADO: Prompt template completamente rediseñado para eventos de charlas
+# PROMPT ESPECIALIZADO PARA CONSULTAS DE EVENTOS
 prompt_template = """
 ### [INST]
-Instrucciones para Generación de Propuestas de Eventos con Speakers:
+Eres un asistente experto en eventos, charlas y conferencias. Tu función es responder preguntas específicas sobre:
+- Horarios de charlas y eventos
+- Información de speakers y ponentes
+- Ubicaciones y salas de eventos
+- Temas y contenidos de las charlas
+- Agenda y programación
+- Logística del evento
 
-Eres un asistente experto en organización de eventos y coordinación de speakers profesionales. Tu función es crear propuestas integrales, detalladas y profesionales para eventos de charlas, conferencias y presentaciones.
-
-CONTEXTO Y CONOCIMIENTO BASE:
+CONTEXTO DISPONIBLE:
 {context}
 
-ESTRUCTURA REQUERIDA PARA LA PROPUESTA:
-Genera una propuesta profesional en formato markdown que incluya OBLIGATORIAMENTE estas 8 secciones:
+INSTRUCCIONES:
+- Responde de forma directa y concisa
+- Si preguntan por horarios, proporciona fechas y horas exactas
+- Si preguntan por ubicaciones, sé específico sobre salas/auditorios
+- Si preguntan por speakers, incluye su información relevante
+- Si preguntan por temas, relaciona las charlas correspondientes
+- Para agendas, organiza por horario y evita conflictos
+- Si no tienes la información exacta, dilo claramente
+- Usa formato claro con bullets o listas cuando sea apropiado
 
-## 1. 🎯 **RESUMEN EJECUTIVO**
-- Objetivo del evento y propuesta de valor
-- Resumen de la charla en 2-3 líneas clave
-- Audiencia objetivo y número estimado de asistentes
+EJEMPLOS DE RESPUESTAS:
+- "Hoy hay 3 charlas programadas: ..."
+- "Las charlas de IA son: [lista con horarios]"
+- "El Dr. García tiene 2 charlas: ..."
+- "El evento se realiza en el Centro de Convenciones Madrid"
 
-## 2. 👤 **PERFIL DEL SPEAKER**
-- Biografía profesional del speaker (150-200 palabras)
-- Experiencia relevante y credenciales
-- Especializaciones y áreas de expertise
-- Eventos previos destacados
-- Contacto y redes sociales
-
-## 3. 📅 **DETALLES DEL EVENTO**
-- Nombre completo del evento
-- Fecha, horario exacto y duración
-- Ubicación específica (sala, edificio, dirección)
-- Formato (presencial, virtual, híbrido)
-- Capacidad y tipo de audiencia
-
-## 4. 💡 **CONTENIDO Y AGENDA DE LA SESIÓN**
-- Título de la presentación
-- Objetivos de aprendizaje (3-5 puntos específicos)
-- Agenda detallada con timing
-- Metodología (presentación, demo, Q&A, workshop)
-- Materiales y recursos que se proporcionarán
-
-## 5. 🛠️ **REQUERIMIENTOS TÉCNICOS Y LOGÍSTICA**
-- Equipamiento audiovisual necesario
-- Requerimientos de conectividad (WiFi, streaming)
-- Setup del escenario y disposición
-- Materiales promocionales
-- Necesidades especiales del speaker
-
-## 6. 🎯 **AUDIENCIA Y EXPECTATIVAS**
-- Perfil detallado de la audiencia objetivo
-- Nivel técnico requerido (básico, intermedio, avanzado)
-- Prerrequisitos de conocimiento
-- Expectativas y resultados esperados
-- Métrica de éxito del evento
-
-## 7. 📢 **MARKETING Y PROMOCIÓN**
-- Propuesta de copy para promoción
-- Canales de difusión recomendados
-- Timeline de marketing pre-evento
-- Materiales gráficos sugeridos
-- Estrategia de redes sociales
-
-## 8. 🔄 **SEGUIMIENTO Y ACTIVIDADES POST-EVENTO**
-- Actividades de networking programadas
-- Materiales de seguimiento para asistentes
-- Encuestas de satisfacción
-- Grabación y distribución de contenido
-- Próximos pasos y acciones recomendadas
-
-DIRECTRICES DE CALIDAD:
-- Usa un tono profesional pero accesible
-- Incluye detalles específicos y accionables
-- Cada sección debe tener 3-5 puntos bien desarrollados
-- Utiliza emojis y formato markdown para mejor legibilidad
-- La propuesta debe ser de 800-1200 palabras mínimo
-- Personaliza el contenido según el tema y audiencia específica
-- Incluye consideraciones de accesibilidad y diversidad
-
-PREGUNTA/SOLICITUD:
+PREGUNTA DEL USUARIO:
 {question}
 
-Genera una propuesta integral siguiendo exactamente la estructura requerida, adaptando todo el contenido al evento específico mencionado en la pregunta.
-
+Responde de forma útil y directa basándote en el contexto disponible.
 [/INST]
 """
 
-# MODIFICADO: Prompt template específico para eventos
 QA_CHAIN_PROMPT = PromptTemplate(
     template=prompt_template, input_variables=["context", "question"]
 )
 
-
 def get_qa_chain(llm):
     """
-    Crea y retorna una cadena de QA optimizada para generar propuestas de eventos.
+    Crea y retorna una cadena de QA optimizada para consultas sobre eventos.
     
     Args:
         llm: Instancia del modelo de lenguaje a utilizar
         
     Returns:
-        RetrievalQA: Cadena configurada para propuestas de eventos
+        RetrievalQA: Cadena configurada para consultas de eventos
     """
     try:
-        # MODIFICADO: Intenta obtener el tipo de DB desde variables de entorno
         db_type = os.getenv("DB_TYPE") if os.getenv("DB_TYPE") else "FAISS"
         if db_type is None:
             raise ValueError("DB_TYPE no está especificado")
         
         print(f"🗃️ Inicializando base de datos vectorial: {db_type}")
         retriever = db_factory.get_retriever(db_type)
-        
         print(f"✅ Retriever {db_type} configurado correctamente")
         
     except Exception as e:
         print(f"⚠️ Error configurando {db_type}: {e}")
-        print(f"🔄 Fallback a FAISS - Las propuestas se generarán sin contexto RAG adicional")
-        
-        # Fallback a FAISS como opción segura
+        print(f"🔄 Fallback a FAISS")
         retriever = db_factory.get_retriever(FAISS)
 
-    # MODIFICADO: Configuración optimizada para propuestas de eventos
     return RetrievalQA.from_chain_type(
         llm=llm,
         retriever=retriever,
-        chain_type="stuff",  # Usar 'stuff' para mejor control del prompt
+        chain_type="stuff",
         chain_type_kwargs={
             "prompt": QA_CHAIN_PROMPT,
-            "verbose": True  # Para debugging en desarrollo
+            "verbose": False
         },
-        return_source_documents=True,  # Incluir fuentes para transparencia
-        input_key="query",  # Clave de entrada para la pregunta
-        output_key="result"  # Clave de salida para el resultado
+        return_source_documents=True,
+        input_key="query",
+        output_key="result"
     )
 
+# ==========================================
+# FUNCIONES AUXILIARES PARA CONSULTAS
+# ==========================================
 
-def format_event_query(event_name, speaker_name, date, time_slot, location, topic, additional_info=""):
+def format_event_query(user_question):
     """
-    Formatea la información del evento en una query estructurada para el LLM.
+    Formatea la pregunta del usuario para mejor procesamiento RAG.
     
     Args:
-        event_name (str): Nombre del evento
-        speaker_name (str): Nombre del speaker
-        date (str): Fecha del evento
-        time_slot (str): Horario del evento
-        location (str): Ubicación del evento
-        topic (str): Tema principal
-        additional_info (str): Información adicional opcional
+        user_question (str): Pregunta original del usuario
         
     Returns:
-        str: Query formateada para el LLM
+        str: Pregunta formateada y optimizada
     """
     
-    # MODIFICADO: Query estructurada específica para eventos
-    formatted_query = f"""
-SOLICITUD DE PROPUESTA PARA EVENTO DE CHARLA
-
-📋 INFORMACIÓN DEL EVENTO:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 Evento: {event_name}
-👤 Speaker: {speaker_name}
-📅 Fecha: {date}
-🕐 Horario: {time_slot}
-📍 Ubicación: {location}
-💡 Tema Principal: {topic}
-"""
+    # Palabras clave para diferentes tipos de consultas
+    time_keywords = ["hoy", "mañana", "día", "fecha", "horario", "hora", "cuándo"]
+    speaker_keywords = ["speaker", "ponente", "conferenciante", "quién", "dr.", "dra."]
+    location_keywords = ["dónde", "ubicación", "sala", "auditorio", "lugar", "local"]
+    topic_keywords = ["tema", "sobre", "relacionado", "inteligencia artificial", "ia", "devops", "machine learning"]
+    agenda_keywords = ["agenda", "cronograma", "programación", "horarios", "cronograma"]
     
-    if additional_info and additional_info.strip():
-        formatted_query += f"📝 Información Adicional: {additional_info}\n"
+    # Clasificar tipo de consulta
+    query_type = "general"
+    user_lower = user_question.lower()
     
-    formatted_query += """
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🎯 OBJETIVO:
-Generar una propuesta profesional integral que incluya:
-• Perfil detallado del speaker y su expertise
-• Agenda completa de la sesión con objetivos de aprendizaje
-• Requerimientos técnicos y logísticos específicos
-• Estrategia de promoción y marketing del evento
-• Plan de seguimiento post-evento
-• Consideraciones de audiencia y expectativas
-
-La propuesta debe ser detallada, profesional y específicamente adaptada a este evento de charla.
-"""
+    if any(keyword in user_lower for keyword in time_keywords):
+        query_type = "horario"
+    elif any(keyword in user_lower for keyword in speaker_keywords):
+        query_type = "speaker"
+    elif any(keyword in user_lower for keyword in location_keywords):
+        query_type = "ubicacion"
+    elif any(keyword in user_lower for keyword in topic_keywords):
+        query_type = "tema"
+    elif any(keyword in user_lower for keyword in agenda_keywords):
+        query_type = "agenda"
+    
+    # Agregar contexto según el tipo de consulta
+    context_prefixes = {
+        "horario": "Consulta sobre horarios y fechas de eventos: ",
+        "speaker": "Consulta sobre speakers y ponentes: ",
+        "ubicacion": "Consulta sobre ubicaciones y lugares: ",
+        "tema": "Consulta sobre temas y contenidos: ",
+        "agenda": "Consulta sobre agenda y programación: ",
+        "general": "Consulta general sobre eventos: "
+    }
+    
+    formatted_query = context_prefixes[query_type] + user_question
     
     return formatted_query
 
-
-def create_speaker_context(speaker_name, topic):
+def extract_key_entities(question):
     """
-    Crea contexto adicional sobre speakers y temas comunes.
+    Extrae entidades clave de la pregunta para mejor búsqueda.
     
     Args:
-        speaker_name (str): Nombre del speaker
-        topic (str): Tema de la charla
+        question (str): Pregunta del usuario
+        
+    Returns:
+        dict: Entidades extraídas (fechas, nombres, temas, etc.)
+    """
+    
+    entities = {
+        "dates": [],
+        "speakers": [],
+        "topics": [],
+        "locations": []
+    }
+    
+    question_lower = question.lower()
+    
+    # Detectar fechas comunes
+    date_patterns = ["hoy", "mañana", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    for pattern in date_patterns:
+        if pattern in question_lower:
+            entities["dates"].append(pattern)
+    
+    # Detectar nombres de speakers (patrones comunes)
+    if "dr." in question_lower or "dra." in question_lower:
+        words = question.split()
+        for i, word in enumerate(words):
+            if word.lower() in ["dr.", "dra."] and i + 1 < len(words):
+                entities["speakers"].append(f"{word} {words[i+1]}")
+    
+    # Detectar temas tecnológicos
+    tech_topics = [
+        "inteligencia artificial", "ia", "machine learning", "ml", 
+        "devops", "cloud", "kubernetes", "docker", "python", 
+        "javascript", "react", "nodejs", "data science"
+    ]
+    
+    for topic in tech_topics:
+        if topic in question_lower:
+            entities["topics"].append(topic)
+    
+    return entities
+
+def suggest_related_questions(user_question):
+    """
+    Sugiere preguntas relacionadas basadas en la consulta del usuario.
+    
+    Args:
+        user_question (str): Pregunta del usuario
+        
+    Returns:
+        list: Lista de preguntas sugeridas
+    """
+    
+    question_lower = user_question.lower()
+    suggestions = []
+    
+    if "horario" in question_lower or "hora" in question_lower:
+        suggestions = [
+            "¿Qué charlas hay disponibles mañana?",
+            "¿Cuál es la agenda completa del evento?",
+            "¿A qué hora termina el evento?"
+        ]
+    elif "speaker" in question_lower or "ponente" in question_lower:
+        suggestions = [
+            "¿Cuántos speakers participan en total?",
+            "¿Qué experiencia tiene este speaker?",
+            "¿En qué otras charlas participa?"
+        ]
+    elif "tema" in question_lower or "sobre" in question_lower:
+        suggestions = [
+            "¿Qué otros temas se cubren en el evento?",
+            "¿Hay charlas relacionadas disponibles?",
+            "¿Cuál es el nivel técnico de estas charlas?"
+        ]
+    else:
+        suggestions = [
+            "¿Cuántas charlas hay en total?",
+            "¿Dónde se realiza el evento?",
+            "¿Cuál es el horario general del evento?"
+        ]
+    
+    return suggestions
+
+def validate_time_conflicts(events_list):
+    """
+    Valida conflictos de horario en una lista de eventos.
+    
+    Args:
+        events_list (list): Lista de eventos con horarios
+        
+    Returns:
+        dict: Información sobre conflictos encontrados
+    """
+    
+    conflicts = {
+        "has_conflicts": False,
+        "conflict_details": [],
+        "suggested_resolution": []
+    }
+    
+    # Esta función se puede expandir para validar horarios reales
+    # cuando se tengan datos estructurados de eventos
+    
+    return conflicts
+
+# ==========================================
+# CONFIGURACIÓN ESPECÍFICA PARA EVENTOS
+# ==========================================
+
+def get_event_specific_params():
+    """
+    Retorna parámetros específicos para consultas de eventos.
+    
+    Returns:
+        dict: Parámetros optimizados para eventos
+    """
+    
+    return {
+        "temperature": 0.3,  # Respuestas más precisas para datos factuales
+        "max_tokens": 500,   # Respuestas concisas
+        "top_p": 0.9
+    }
+
+def create_event_context(question_type):
+    """
+    Crea contexto específico según el tipo de pregunta sobre eventos.
+    
+    Args:
+        question_type (str): Tipo de pregunta (horario, speaker, tema, etc.)
         
     Returns:
         str: Contexto adicional para el LLM
     """
     
-    # Mapeo de temas a contextos especializados
-    topic_contexts = {
-        "inteligencia artificial": "contexto de IA, machine learning, deep learning, aplicaciones prácticas",
-        "ia": "contexto de IA, machine learning, deep learning, aplicaciones prácticas",
-        "machine learning": "algoritmos ML, casos de uso, herramientas, mejores prácticas",
-        "desarrollo": "metodologías de desarrollo, frameworks, arquitectura de software",
-        "devops": "CI/CD, containerización, automatización, monitoreo",
-        "cloud": "servicios en la nube, arquitectura cloud, migración, seguridad",
-        "ciberseguridad": "amenazas, protección, compliance, mejores prácticas",
-        "blockchain": "tecnología distribuida, casos de uso, implementación",
-        "frontend": "desarrollo web, frameworks JS, UX/UI, performance",
-        "backend": "arquitectura de servicios, bases de datos, APIs",
-        "mobile": "desarrollo móvil, apps nativas, cross-platform"
+    contexts = {
+        "horario": "Enfócate en proporcionar horarios exactos, fechas específicas y duración de las charlas.",
+        "speaker": "Proporciona información detallada sobre la experiencia y expertise del speaker.",
+        "tema": "Explica el contenido de las charlas y su relevancia técnica.",
+        "ubicacion": "Sé específico sobre salas, auditorios y cómo llegar al lugar.",
+        "agenda": "Organiza la información cronológicamente y evita conflictos de horario."
     }
     
-    # Buscar contexto relevante basado en palabras clave del tema
-    relevant_context = "desarrollo de software y tecnología"
-    topic_lower = topic.lower()
-    
-    for keyword, context in topic_contexts.items():
-        if keyword in topic_lower:
-            relevant_context = context
-            break
-    
-    context = f"""
-CONTEXTO PARA LA PROPUESTA:
+    return contexts.get(question_type, "Proporciona información precisa y útil sobre el evento.")
 
-Speaker: {speaker_name}
-- Se asume experiencia profesional en {relevant_context}
-- Credenciales y trayectoria relevante al tema
-- Capacidad de presentación a audiencias técnicas y no técnicas
-
-Tema: {topic}
-- Enfoque en aplicaciones prácticas y casos de uso reales
-- Contenido actualizado con tendencias y mejores prácticas
-- Adaptado al nivel de la audiencia objetivo
-
-Consideraciones del Evento:
-- Formato profesional y educativo
-- Interacción con audiencia (Q&A, networking)
-- Materiales de apoyo y seguimiento
-- Métricas de éxito y satisfacción
-"""
-    
-    return context
-
-
-def validate_event_data(event_name, speaker_name, topic):
+# Función principal mejorada para chatbot
+def enhance_query_for_chatbot(user_question):
     """
-    Valida que los datos del evento sean suficientes para generar una buena propuesta.
+    Mejora la query del usuario para mejor experiencia de chatbot.
     
     Args:
-        event_name (str): Nombre del evento
-        speaker_name (str): Nombre del speaker  
-        topic (str): Tema principal
+        user_question (str): Pregunta original del usuario
         
     Returns:
-        tuple: (is_valid, error_message)
+        dict: Query mejorada con contexto adicional
     """
     
-    errors = []
-    
-    if not event_name or len(event_name.strip()) < 3:
-        errors.append("El nombre del evento debe tener al menos 3 caracteres")
-    
-    if not speaker_name or len(speaker_name.strip()) < 2:
-        errors.append("El nombre del speaker debe tener al menos 2 caracteres")
-    
-    if not topic or len(topic.strip()) < 5:
-        errors.append("El tema debe tener al menos 5 caracteres")
-    
-    if errors:
-        return False, "; ".join(errors)
-    
-    return True, ""
-
-
-def enhance_query_with_context(base_query, event_name, speaker_name, topic):
-    """
-    Mejora la query base agregando contexto específico del dominio.
-    
-    Args:
-        base_query (str): Query base formateada
-        event_name (str): Nombre del evento
-        speaker_name (str): Nombre del speaker
-        topic (str): Tema principal
-        
-    Returns:
-        str: Query mejorada con contexto adicional
-    """
-    
-    # Agregar contexto específico
-    speaker_context = create_speaker_context(speaker_name, topic)
-    
-    enhanced_query = f"{base_query}\n\n{speaker_context}"
-    
-    return enhanced_query
-
-
-# MODIFICADO: Funciones de utilidad adicionales para eventos
-
-def get_event_templates():
-    """
-    Retorna templates predefinidos para diferentes tipos de eventos.
-    
-    Returns:
-        dict: Templates por tipo de evento
-    """
+    formatted_query = format_event_query(user_question)
+    entities = extract_key_entities(user_question)
+    suggestions = suggest_related_questions(user_question)
     
     return {
-        "conferencia_tech": {
-            "duration": "45-60 minutos",
-            "format": "Presentación + Q&A",
-            "audience_size": "100-500 personas",
-            "technical_level": "Intermedio-Avanzado"
-        },
-        "workshop": {
-            "duration": "2-4 horas", 
-            "format": "Hands-on + Ejercicios prácticos",
-            "audience_size": "20-50 personas",
-            "technical_level": "Variable según topic"
-        },
-        "keynote": {
-            "duration": "30-45 minutos",
-            "format": "Presentación inspiracional",
-            "audience_size": "200-1000+ personas", 
-            "technical_level": "General audience"
-        },
-        "panel": {
-            "duration": "60-90 minutos",
-            "format": "Discusión moderada + Q&A",
-            "audience_size": "50-300 personas",
-            "technical_level": "Intermedio"
-        }
+        "formatted_query": formatted_query,
+        "entities": entities,
+        "suggestions": suggestions,
+        "original_question": user_question
     }
-
-
-def suggest_event_improvements(event_data):
-    """
-    Sugiere mejoras basadas en los datos del evento proporcionados.
-    
-    Args:
-        event_data (dict): Datos del evento
-        
-    Returns:
-        list: Lista de sugerencias de mejora
-    """
-    
-    suggestions = []
-    
-    # Validar duración basada en tema
-    if "workshop" in event_data.get("topic", "").lower():
-        suggestions.append("💡 Considerar formato de workshop (2-4 horas) para mayor interactividad")
-    
-    # Sugerir networking
-    suggestions.append("🤝 Incluir sesión de networking pre/post evento")
-    
-    # Sugerir grabación
-    suggestions.append("📹 Considerar grabación para alcance posterior")
-    
-    # Sugerir materiales
-    suggestions.append("📚 Preparar materiales descargables para asistentes")
-    
-    return suggestions
-
-
-# MODIFICADO: Configuración adicional para diferentes tipos de LLM
-
-def get_llm_specific_params(llm_type):
-    """
-    Retorna parámetros específicos según el tipo de LLM para optimizar propuestas.
-    
-    Args:
-        llm_type (str): Tipo de LLM (openai, huggingface, etc.)
-        
-    Returns:
-        dict: Parámetros optimizados
-    """
-    
-    params = {
-        "openai": {
-            "temperature": 0.7,
-            "max_tokens": 1500,
-            "top_p": 0.9
-        },
-        "huggingface": {
-            "temperature": 0.8,
-            "max_new_tokens": 1024,
-            "do_sample": True
-        },
-        "anthropic": {
-            "temperature": 0.7,
-            "max_tokens_to_sample": 1500
-        }
-    }
-    
-    return params.get(llm_type, params["openai"])
-
-
-# MODIFICADO: Función principal mejorada
-
-def create_enhanced_qa_chain(llm, llm_type="openai"):
-    """
-    Crea una cadena QA mejorada con parámetros optimizados para el tipo de LLM.
-    
-    Args:
-        llm: Instancia del LLM
-        llm_type (str): Tipo de LLM para optimización
-        
-    Returns:
-        RetrievalQA: Cadena QA optimizada
-    """
-    
-    # Obtener parámetros específicos del LLM
-    llm_params = get_llm_specific_params(llm_type)
-    
-    # Aplicar parámetros si el LLM los soporta
-    for param, value in llm_params.items():
-        if hasattr(llm, param):
-            setattr(llm, param, value)
-    
-    return get_qa_chain(llm)

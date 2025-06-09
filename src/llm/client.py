@@ -1,508 +1,192 @@
 import json
 import requests
-
 from aiohttp import ClientSession, ClientTimeout
-from pydantic import ValidationError
 from typing import Dict, Optional, List, AsyncIterator, Iterator
 
-from text_generation.types import (
-    StreamResponse,
-    Response,
-    Request,
-    Parameters,
-)
-from text_generation.errors import parse_error
-
-
 class Client:
-    """Client to make calls to a text-generation-inference instance
+    """Cliente HTTP simple para text-generation-inference"""
 
-     Example:
-
-     ```python
-     >>> from text_generation import Client
-
-     >>> client = Client("https://api-inference.huggingface.co/models/bigscience/bloomz")
-     >>> client.generate("Why is the sky blue?").generated_text
-     ' Rayleigh scattering'
-
-     >>> result = ""
-     >>> for response in client.generate_stream("Why is the sky blue?"):
-     >>>     if not response.token.special:
-     >>>         result += response.token.text
-     >>> result
-    ' Rayleigh scattering'
-     ```
-    """
-
-    def __init__(
-        self,
-        base_url: str,
-        headers: Optional[Dict[str, str]] = None,
-        cookies: Optional[Dict[str, str]] = None,
-        timeout: int = 10,
-    ):
-        """
-        Args:
-            base_url (`str`):
-                text-generation-inference instance base url
-            headers (`Optional[Dict[str, str]]`):
-                Additional headers
-            cookies (`Optional[Dict[str, str]]`):
-                Cookies to include in the requests
-            timeout (`int`):
-                Timeout in seconds
-        """
+    def __init__(self, base_url: str, headers: Optional[Dict[str, str]] = None, 
+                 cookies: Optional[Dict[str, str]] = None, timeout: int = 120):
         self.base_url = base_url
-        self.headers = headers
-        self.cookies = cookies
+        self.headers = headers or {}
+        self.cookies = cookies or {}
         self.timeout = timeout
 
-    def generate(
-        self,
-        prompt: str,
-        do_sample: bool = False,
-        max_new_tokens: int = 20,
-        best_of: Optional[int] = None,
-        repetition_penalty: Optional[float] = None,
-        return_full_text: bool = False,
-        seed: Optional[int] = None,
-        stop_sequences: Optional[List[str]] = None,
-        temperature: Optional[float] = None,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
-        truncate: Optional[int] = None,
-        typical_p: Optional[float] = None,
-        watermark: bool = False,
-        decoder_input_details: bool = False,
-        top_n_tokens: Optional[int] = None,
-    ) -> Response:
-        """
-        Given a prompt, generate the following text
+    def generate(self, prompt: str, **kwargs):
+        """Genera texto usando la API"""
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": kwargs.get("max_new_tokens", 512),
+                "temperature": kwargs.get("temperature", 0.7),
+                "top_p": kwargs.get("top_p", 0.95),
+                "do_sample": kwargs.get("do_sample", True),
+                "return_full_text": kwargs.get("return_full_text", False)
+            }
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/generate",
+                json=payload,
+                headers=self.headers,
+                cookies=self.cookies,
+                timeout=self.timeout,
+                verify=False
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Simular estructura esperada
+            class GenerateResponse:
+                def __init__(self, generated_text):
+                    self.generated_text = generated_text
+            
+            if isinstance(result, list) and len(result) > 0:
+                return GenerateResponse(result[0].get("generated_text", ""))
+            elif isinstance(result, dict):
+                return GenerateResponse(result.get("generated_text", ""))
+            else:
+                return GenerateResponse("Error en la respuesta del servidor")
+                
+        except Exception as e:
+            print(f"Error en Client.generate: {e}")
+            # Retornar respuesta por defecto
+            class ErrorResponse:
+                def __init__(self):
+                    self.generated_text = "Error: No se pudo conectar con el modelo LLM local"
+            return ErrorResponse()
 
-        Args:
-            prompt (`str`):
-                Input text
-            do_sample (`bool`):
-                Activate logits sampling
-            max_new_tokens (`int`):
-                Maximum number of generated tokens
-            best_of (`int`):
-                Generate best_of sequences and return the one if the highest token logprobs
-            repetition_penalty (`float`):
-                The parameter for repetition penalty. 1.0 means no penalty. See [this
-                paper](https://arxiv.org/pdf/1909.05858.pdf) for more details.
-            return_full_text (`bool`):
-                Whether to prepend the prompt to the generated text
-            seed (`int`):
-                Random sampling seed
-            stop_sequences (`List[str]`):
-                Stop generating tokens if a member of `stop_sequences` is generated
-            temperature (`float`):
-                The value used to module the logits distribution.
-            top_k (`int`):
-                The number of highest probability vocabulary tokens to keep for top-k-filtering.
-            top_p (`float`):
-                If set to < 1, only the smallest set of most probable tokens with probabilities that add up to `top_p` or
-                higher are kept for generation.
-            truncate (`int`):
-                Truncate inputs tokens to the given size
-            typical_p (`float`):
-                Typical Decoding mass
-                See [Typical Decoding for Natural Language Generation](https://arxiv.org/abs/2202.00666) for more information
-            watermark (`bool`):
-                Watermarking with [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)
-            decoder_input_details (`bool`):
-                Return the decoder input token logprobs and ids
-            top_n_tokens (`int`):
-                Return the `n` most likely tokens at each step
-
-        Returns:
-            Response: generated response
-        """
-        # Validate parameters
-        parameters = Parameters(
-            best_of=best_of,
-            details=True,
-            do_sample=do_sample,
-            max_new_tokens=max_new_tokens,
-            repetition_penalty=repetition_penalty,
-            return_full_text=return_full_text,
-            seed=seed,
-            stop=stop_sequences if stop_sequences is not None else [],
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            truncate=truncate,
-            typical_p=typical_p,
-            watermark=watermark,
-            decoder_input_details=decoder_input_details,
-            top_n_tokens=top_n_tokens,
-        )
-        request = Request(inputs=prompt, stream=False, parameters=parameters)
-
-        resp = requests.post(
-            self.base_url,
-            json=request.dict(),
-            headers=self.headers,
-            cookies=self.cookies,
-            timeout=self.timeout,
-            verify=False,
-        )
-        payload = resp.json()
-        if resp.status_code != 200:
-            raise parse_error(resp.status_code, payload)
-        return Response(**payload[0])
-
-    def generate_stream(
-        self,
-        prompt: str,
-        do_sample: bool = False,
-        max_new_tokens: int = 20,
-        repetition_penalty: Optional[float] = None,
-        return_full_text: bool = False,
-        seed: Optional[int] = None,
-        stop_sequences: Optional[List[str]] = None,
-        temperature: Optional[float] = None,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
-        truncate: Optional[int] = None,
-        typical_p: Optional[float] = None,
-        watermark: bool = False,
-        top_n_tokens: Optional[int] = None,
-    ) -> Iterator[StreamResponse]:
-        """
-        Given a prompt, generate the following stream of tokens
-
-        Args:
-            prompt (`str`):
-                Input text
-            do_sample (`bool`):
-                Activate logits sampling
-            max_new_tokens (`int`):
-                Maximum number of generated tokens
-            repetition_penalty (`float`):
-                The parameter for repetition penalty. 1.0 means no penalty. See [this
-                paper](https://arxiv.org/pdf/1909.05858.pdf) for more details.
-            return_full_text (`bool`):
-                Whether to prepend the prompt to the generated text
-            seed (`int`):
-                Random sampling seed
-            stop_sequences (`List[str]`):
-                Stop generating tokens if a member of `stop_sequences` is generated
-            temperature (`float`):
-                The value used to module the logits distribution.
-            top_k (`int`):
-                The number of highest probability vocabulary tokens to keep for top-k-filtering.
-            top_p (`float`):
-                If set to < 1, only the smallest set of most probable tokens with probabilities that add up to `top_p` or
-                higher are kept for generation.
-            truncate (`int`):
-                Truncate inputs tokens to the given size
-            typical_p (`float`):
-                Typical Decoding mass
-                See [Typical Decoding for Natural Language Generation](https://arxiv.org/abs/2202.00666) for more information
-            watermark (`bool`):
-                Watermarking with [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)
-            top_n_tokens (`int`):
-                Return the `n` most likely tokens at each step
-
-        Returns:
-            Iterator[StreamResponse]: stream of generated tokens
-        """
-        # Validate parameters
-        parameters = Parameters(
-            best_of=None,
-            details=True,
-            decoder_input_details=False,
-            do_sample=do_sample,
-            max_new_tokens=max_new_tokens,
-            repetition_penalty=repetition_penalty,
-            return_full_text=return_full_text,
-            seed=seed,
-            stop=stop_sequences if stop_sequences is not None else [],
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            truncate=truncate,
-            typical_p=typical_p,
-            watermark=watermark,
-            top_n_tokens=top_n_tokens,
-        )
-        request = Request(inputs=prompt, stream=True, parameters=parameters)
-
-        resp = requests.post(
-            self.base_url,
-            json=request.dict(),
-            headers=self.headers,
-            cookies=self.cookies,
-            timeout=self.timeout,
-            stream=True,
-            verify=False,
-        )
-
-        if resp.status_code != 200:
-            raise parse_error(resp.status_code, resp.json())
-
-        # Parse ServerSentEvents
-        for byte_payload in resp.iter_lines():
-            # Skip line
-            if byte_payload == b"\n":
-                continue
-
-            payload = byte_payload.decode("utf-8")
-
-            # Event data
-            if payload.startswith("data:"):
-                # Decode payload
-                json_payload = json.loads(payload.lstrip("data:").rstrip("/n"))
-                # Parse payload
-                try:
-                    response = StreamResponse(**json_payload)
-                except ValidationError:
-                    # If we failed to parse the payload, then it is an error payload
-                    raise parse_error(resp.status_code, json_payload)
-                yield response
-
+    def generate_stream(self, prompt: str, **kwargs):
+        """Genera texto con streaming"""
+        payload = {
+            "inputs": prompt,
+            "stream": True,
+            "parameters": {
+                "max_new_tokens": kwargs.get("max_new_tokens", 512),
+                "temperature": kwargs.get("temperature", 0.7),
+                "top_p": kwargs.get("top_p", 0.95),
+                "do_sample": kwargs.get("do_sample", True)
+            }
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/generate_stream",
+                json=payload,
+                headers=self.headers,
+                cookies=self.cookies,
+                timeout=self.timeout,
+                stream=True,
+                verify=False
+            )
+            
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        data = json.loads(line.decode('utf-8'))
+                        
+                        # Simular estructura de StreamResponse
+                        class StreamToken:
+                            def __init__(self, text, special=False):
+                                self.text = text
+                                self.special = special
+                        
+                        class StreamResponse:
+                            def __init__(self, token):
+                                self.token = token
+                        
+                        if 'token' in data:
+                            token = StreamToken(data['token'].get('text', ''))
+                            yield StreamResponse(token)
+                            
+                    except json.JSONDecodeError:
+                        continue
+                        
+        except Exception as e:
+            print(f"Error en Client.generate_stream: {e}")
+            # Yield respuesta por defecto
+            class StreamToken:
+                def __init__(self, text):
+                    self.text = text
+                    self.special = False
+            
+            class StreamResponse:
+                def __init__(self, token):
+                    self.token = token
+            
+            yield StreamResponse(StreamToken("Error: No se pudo conectar con el modelo LLM local"))
 
 class AsyncClient:
-    """Asynchronous Client to make calls to a text-generation-inference instance
+    """Cliente HTTP asíncrono simple"""
 
-     Example:
-
-     ```python
-     >>> from text_generation import AsyncClient
-
-     >>> client = AsyncClient("https://api-inference.huggingface.co/models/bigscience/bloomz")
-     >>> response = await client.generate("Why is the sky blue?")
-     >>> response.generated_text
-     ' Rayleigh scattering'
-
-     >>> result = ""
-     >>> async for response in client.generate_stream("Why is the sky blue?"):
-     >>>     if not response.token.special:
-     >>>         result += response.token.text
-     >>> result
-    ' Rayleigh scattering'
-     ```
-    """
-
-    def __init__(
-        self,
-        base_url: str,
-        headers: Optional[Dict[str, str]] = None,
-        cookies: Optional[Dict[str, str]] = None,
-        timeout: int = 10,
-    ):
-        """
-        Args:
-            base_url (`str`):
-                text-generation-inference instance base url
-            headers (`Optional[Dict[str, str]]`):
-                Additional headers
-            cookies (`Optional[Dict[str, str]]`):
-                Cookies to include in the requests
-            timeout (`int`):
-                Timeout in seconds
-        """
+    def __init__(self, base_url: str, headers: Optional[Dict[str, str]] = None,
+                 cookies: Optional[Dict[str, str]] = None, timeout: int = 120):
         self.base_url = base_url
-        self.headers = headers
-        self.cookies = cookies
-        self.timeout = ClientTimeout(timeout * 60)
+        self.headers = headers or {}
+        self.cookies = cookies or {}
+        self.timeout = ClientTimeout(total=timeout)
 
-    async def generate(
-        self,
-        prompt: str,
-        do_sample: bool = False,
-        max_new_tokens: int = 20,
-        best_of: Optional[int] = None,
-        repetition_penalty: Optional[float] = None,
-        return_full_text: bool = False,
-        seed: Optional[int] = None,
-        stop_sequences: Optional[List[str]] = None,
-        temperature: Optional[float] = None,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
-        truncate: Optional[int] = None,
-        typical_p: Optional[float] = None,
-        watermark: bool = False,
-        decoder_input_details: bool = False,
-        top_n_tokens: Optional[int] = None,
-    ) -> Response:
-        """
-        Given a prompt, generate the following text asynchronously
+    async def generate(self, prompt: str, **kwargs):
+        """Genera texto de forma asíncrona"""
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": kwargs.get("max_new_tokens", 512),
+                "temperature": kwargs.get("temperature", 0.7),
+                "top_p": kwargs.get("top_p", 0.95),
+                "do_sample": kwargs.get("do_sample", True),
+                "return_full_text": kwargs.get("return_full_text", False)
+            }
+        }
+        
+        try:
+            async with ClientSession(
+                headers=self.headers, 
+                cookies=self.cookies, 
+                timeout=self.timeout
+            ) as session:
+                async with session.post(
+                    f"{self.base_url}/generate",
+                    json=payload
+                ) as response:
+                    result = await response.json()
+                    
+                    class GenerateResponse:
+                        def __init__(self, generated_text):
+                            self.generated_text = generated_text
+                    
+                    if isinstance(result, list) and len(result) > 0:
+                        return GenerateResponse(result[0].get("generated_text", ""))
+                    elif isinstance(result, dict):
+                        return GenerateResponse(result.get("generated_text", ""))
+                    else:
+                        return GenerateResponse("Error en la respuesta del servidor")
+                        
+        except Exception as e:
+            print(f"Error en AsyncClient.generate: {e}")
+            class ErrorResponse:
+                def __init__(self):
+                    self.generated_text = "Error: No se pudo conectar con el modelo LLM local"
+            return ErrorResponse()
 
-        Args:
-            prompt (`str`):
-                Input text
-            do_sample (`bool`):
-                Activate logits sampling
-            max_new_tokens (`int`):
-                Maximum number of generated tokens
-            best_of (`int`):
-                Generate best_of sequences and return the one if the highest token logprobs
-            repetition_penalty (`float`):
-                The parameter for repetition penalty. 1.0 means no penalty. See [this
-                paper](https://arxiv.org/pdf/1909.05858.pdf) for more details.
-            return_full_text (`bool`):
-                Whether to prepend the prompt to the generated text
-            seed (`int`):
-                Random sampling seed
-            stop_sequences (`List[str]`):
-                Stop generating tokens if a member of `stop_sequences` is generated
-            temperature (`float`):
-                The value used to module the logits distribution.
-            top_k (`int`):
-                The number of highest probability vocabulary tokens to keep for top-k-filtering.
-            top_p (`float`):
-                If set to < 1, only the smallest set of most probable tokens with probabilities that add up to `top_p` or
-                higher are kept for generation.
-            truncate (`int`):
-                Truncate inputs tokens to the given size
-            typical_p (`float`):
-                Typical Decoding mass
-                See [Typical Decoding for Natural Language Generation](https://arxiv.org/abs/2202.00666) for more information
-            watermark (`bool`):
-                Watermarking with [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)
-            decoder_input_details (`bool`):
-                Return the decoder input token logprobs and ids
-            top_n_tokens (`int`):
-                Return the `n` most likely tokens at each step
-
-        Returns:
-            Response: generated response
-        """
-        # Validate parameters
-        parameters = Parameters(
-            best_of=best_of,
-            details=True,
-            decoder_input_details=decoder_input_details,
-            do_sample=do_sample,
-            max_new_tokens=max_new_tokens,
-            repetition_penalty=repetition_penalty,
-            return_full_text=return_full_text,
-            seed=seed,
-            stop=stop_sequences if stop_sequences is not None else [],
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            truncate=truncate,
-            typical_p=typical_p,
-            watermark=watermark,
-            top_n_tokens=top_n_tokens,
-        )
-        request = Request(inputs=prompt, stream=False, parameters=parameters)
-
-        async with ClientSession(
-            headers=self.headers, cookies=self.cookies, timeout=self.timeout
-        ) as session:
-            async with session.post(self.base_url, json=request.dict()) as resp:
-                payload = await resp.json()
-
-                if resp.status != 200:
-                    raise parse_error(resp.status, payload)
-                return Response(**payload[0])
-
-    async def generate_stream(
-        self,
-        prompt: str,
-        do_sample: bool = False,
-        max_new_tokens: int = 20,
-        repetition_penalty: Optional[float] = None,
-        return_full_text: bool = False,
-        seed: Optional[int] = None,
-        stop_sequences: Optional[List[str]] = None,
-        temperature: Optional[float] = None,
-        top_k: Optional[int] = None,
-        top_p: Optional[float] = None,
-        truncate: Optional[int] = None,
-        typical_p: Optional[float] = None,
-        watermark: bool = False,
-        top_n_tokens: Optional[int] = None,
-    ) -> AsyncIterator[StreamResponse]:
-        """
-        Given a prompt, generate the following stream of tokens asynchronously
-
-        Args:
-            prompt (`str`):
-                Input text
-            do_sample (`bool`):
-                Activate logits sampling
-            max_new_tokens (`int`):
-                Maximum number of generated tokens
-            repetition_penalty (`float`):
-                The parameter for repetition penalty. 1.0 means no penalty. See [this
-                paper](https://arxiv.org/pdf/1909.05858.pdf) for more details.
-            return_full_text (`bool`):
-                Whether to prepend the prompt to the generated text
-            seed (`int`):
-                Random sampling seed
-            stop_sequences (`List[str]`):
-                Stop generating tokens if a member of `stop_sequences` is generated
-            temperature (`float`):
-                The value used to module the logits distribution.
-            top_k (`int`):
-                The number of highest probability vocabulary tokens to keep for top-k-filtering.
-            top_p (`float`):
-                If set to < 1, only the smallest set of most probable tokens with probabilities that add up to `top_p` or
-                higher are kept for generation.
-            truncate (`int`):
-                Truncate inputs tokens to the given size
-            typical_p (`float`):
-                Typical Decoding mass
-                See [Typical Decoding for Natural Language Generation](https://arxiv.org/abs/2202.00666) for more information
-            watermark (`bool`):
-                Watermarking with [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)
-            top_n_tokens (`int`):
-                Return the `n` most likely tokens at each step
-
-        Returns:
-            AsyncIterator[StreamResponse]: stream of generated tokens
-        """
-        # Validate parameters
-        parameters = Parameters(
-            best_of=None,
-            details=True,
-            decoder_input_details=False,
-            do_sample=do_sample,
-            max_new_tokens=max_new_tokens,
-            repetition_penalty=repetition_penalty,
-            return_full_text=return_full_text,
-            seed=seed,
-            stop=stop_sequences if stop_sequences is not None else [],
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            truncate=truncate,
-            typical_p=typical_p,
-            watermark=watermark,
-            top_n_tokens=top_n_tokens,
-        )
-        request = Request(inputs=prompt, stream=True, parameters=parameters)
-
-        async with ClientSession(
-            headers=self.headers, cookies=self.cookies, timeout=self.timeout
-        ) as session:
-            async with session.post(self.base_url, json=request.dict()) as resp:
-                if resp.status != 200:
-                    raise parse_error(resp.status, await resp.json())
-
-                # Parse ServerSentEvents
-                async for byte_payload in resp.content:
-                    # Skip line
-                    if byte_payload == b"\n":
-                        continue
-
-                    payload = byte_payload.decode("utf-8")
-
-                    # Event data
-                    if payload.startswith("data:"):
-                        # Decode payload
-                        json_payload = json.loads(payload.lstrip("data:").rstrip("/n"))
-                        # Parse payload
-                        try:
-                            response = StreamResponse(**json_payload)
-                        except ValidationError:
-                            # If we failed to parse the payload, then it is an error payload
-                            raise parse_error(resp.status, json_payload)
-                        yield response
+    async def generate_stream(self, prompt: str, **kwargs):
+        """Genera texto con streaming asíncrono"""
+        # Implementación simplificada
+        response = await self.generate(prompt, **kwargs)
+        
+        class StreamToken:
+            def __init__(self, text):
+                self.text = text
+                self.special = False
+        
+        class StreamResponse:
+            def __init__(self, token):
+                self.token = token
+        
+        # Simular streaming dividiendo la respuesta
+        words = response.generated_text.split()
+        for word in words:
+            yield StreamResponse(StreamToken(word + " "))
