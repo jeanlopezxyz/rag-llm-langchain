@@ -1,0 +1,39 @@
+# Dockerfile para desarrollo con hot reload
+FROM python:3.11-slim
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    wkhtmltopdf \
+    git \
+    curl \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Establecer directorio de trabajo
+WORKDIR /app
+
+# Copiar requirements
+COPY requirements.txt .
+COPY requirements-dev.txt .
+
+# Instalar dependencias Python (incluyendo dev)
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements-dev.txt
+
+# Crear directorios necesarios
+RUN mkdir -p assets/event-proposals data/speakers data/events
+
+# Configurar git (para desarrollo)
+RUN git config --global --add safe.directory /app
+
+# Exponer puerto
+EXPOSE 7860
+EXPOSE 8000
+
+# Variables de entorno para desarrollo
+ENV PYTHONPATH=/app/src
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Comando por defecto (puede ser sobrescrito)
+CMD ["python", "src/app.py"]

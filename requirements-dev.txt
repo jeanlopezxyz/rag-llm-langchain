@@ -1,0 +1,32 @@
+# Dependencias para desarrollo y testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+isort>=5.12.0
+mypy>=1.0.0
+pre-commit>=3.0.0
+jupyter>=1.0.0
+ipykernel>=6.0.0
+notebook>=6.0.0
+
+# Debugging
+pdb++>=0.10.0
+ipdb>=0.13.0
+
+# Documentation
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.2.0
+
+# Performance profiling
+memory-profiler>=0.60.0
+line-profiler>=4.0.0
+
+# Development utilities
+watchdog>=3.0.0
+python-dotenv>=1.0.0
+
+# API testing
+httpx>=0.24.0
+requests-mock>=1.10.0

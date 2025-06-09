@@ -1,0 +1,24 @@
+# Redis Vector Database Schema for Speaker Events
+
+index:
+  name: speaker_events
+  prefix: "event:"
+  
+fields:
+  - name: content
+    type: text
+    weight: 1.0
+    
+  - name: metadata
+    type: text
+    
+  - name: vector
+    type: vector
+    algorithm: HNSW
+    attributes:
+      type: FLOAT32
+      dim: 768  # Dimension for sentence-transformers/all-MiniLM-L6-v2
+      distance_metric: COSINE
+      initial_cap: 1000
+      m: 16
+      ef_construction: 200
