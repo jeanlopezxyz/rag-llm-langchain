@@ -1,12 +1,27 @@
-# Byte-compiled / optimized / DLL files
+# ####################
+# # Python General #
+# ####################
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
-
-# C extensions
 *.so
 
-# Distribution / packaging
+# ####################
+# # Entornos Virtuales #
+# ####################
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+__pypackages__/
+
+
+# ####################
+# # Dependencias y Paquetes #
+# ####################
 .Python
 build/
 develop-eggs/
@@ -27,21 +42,22 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-*.manifest
-*.spec
+# NOTA: Los archivos .lock (Pipfile.lock, poetry.lock) no se ignoran
+# para garantizar entornos 100% reproducibles en cualquier máquina.
 
-# Installer logs
+# Logs de instalación
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
+
+# ####################
+# # Testing y Cobertura #
+# ####################
 htmlcov/
 .tox/
 .nox/
 .coverage
 .coverage.*
-.cache
 nosetests.xml
 coverage.xml
 *.cover
@@ -49,51 +65,23 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Virtual environments
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
 
-# Environment variables
-.env
-.env.local
-.env.production
-.env.staging
-
-# IDE
+# ####################
+# # IDEs y Editores #
+# ####################
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.spyderproject
+.spyproject
+.ropeproject
 
-# Logs
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Generated files
-assets/event-proposals/*.pdf
-assets/proposal-docs/*.pdf
-*.tmp
-*.temp
-
-# Database files
-*.db
-*.sqlite3
-*.sqlite
-
-# OS generated files
+# ####################
+# # Archivos de Sistema Operativo #
+# ####################
 .DS_Store
 .DS_Store?
 ._*
@@ -102,6 +90,50 @@ assets/proposal-docs/*.pdf
 ehthumbs.db
 Thumbs.db
 
+
+# ####################
+# # Logs y Datos de Runtime #
+# ####################
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pids
+*.pid
+*.seed
+*.pid.lock
+celerybeat-schedule
+
+
+# ####################
+# # Archivos Generados, Temporales y Caché #
+# ####################
+# Ignorar el directorio principal de caché (para modelos de HF, etc.)
+cache/
+.cache
+
+# Archivos generados por la aplicación
+assets/event-proposals/
+assets/proposal-docs/
+
+# Archivos temporales
+*.tmp
+*.temp
+data/temp/
+
+
+# ####################
+# # Bases de Datos Locales #
+# ####################
+*.db
+*.sqlite3
+*.sqlite
+
+
+# ####################
+# # Herramientas Específicas #
+# ####################
 # Docker
 .docker/
 docker-compose.override.yml
@@ -109,47 +141,32 @@ docker-compose.override.yml
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# PEP 582
-__pypackages__/
-
-# Celery beat schedule file
-celerybeat-schedule
-
-# SageMath parsed files
-*.sage.py
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
+# Documentación MkDocs
 /site
 
-# mypy
+# Type Checkers
 .mypy_cache/
 .dmypy.json
 dmypy.json
-
-# Pyre type checker
 .pyre/
 
-# Local data
-data/temp/
-data/cache/
-backups/
+# SageMath
+*.sage.py
 
-# API Keys and secrets (backup protection)
+# ####################
+# # Secretos y Variables de Entorno #
+# ####################
+# Ignorar todos los archivos .env
+.env
+.env.*
+!.env.example
+
+# ADVERTENCIA: Las siguientes reglas son muy amplias y podrían ignorar
+# archivos que no son secretos. Úsalas con precaución.
 **/secrets/
 **/*secret*
 **/*key*
 **/*token*
+
+# No ignorar requirements.txt aunque contenga "key" o "token" en su nombre
 !requirements.txt
