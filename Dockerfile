@@ -22,7 +22,6 @@ RUN mkdir -p /install
 # Copiar requirements.txt
 COPY requirements.txt .
 
-# --- CORRECCIÓN AQUÍ ---
 # Actualizar pip a la última versión para eliminar el notice y asegurar compatibilidad.
 RUN pip install --upgrade pip
 
@@ -35,7 +34,7 @@ RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
 FROM python:3.11-slim
 
 # Metadata de la imagen
-LABEL maintainer="Evento Speaker Assistant"
+LABEL maintainer="Jean Paul Lopez"
 LABEL version="1.0.0"
 LABEL description="Aplicación para generar propuestas de eventos con speakers usando IA"
 
@@ -63,7 +62,11 @@ COPY redis_schema.yaml .
 
 # Copiar y crear directorios necesarios
 COPY assets/ ./assets/
-RUN mkdir -p assets/event-proposals data/speakers data/events data/venues logs
+RUN mkdir -p assets/event-proposals data/speakers data/events data/venues logs .cache/huggingface
+
+# Copiar script de entrada
+COPY entrypoint.sh /app/
+RUN chmod +x /app/entrypoint.sh
 
 # Configurar permisos
 RUN chown -R appuser:appuser /app
@@ -75,10 +78,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Variables de entorno de la aplicación
-ENV APP_TITLE="Evento Speaker Assistant 🎤"
+ENV APP_TITLE="Evento Speaker Assistant KCD Guatemala"
 ENV CONFIG_FILE=config.yaml
 ENV DB_TYPE=FAISS
 ENV PROMETHEUS_PORT=8000
+
+# FIX: Variables para configuración correcta
+ENV HF_HOME=/app/.cache/huggingface
+ENV TOKENIZERS_PARALLELISM=true
 
 # Cambiar a usuario no-root
 USER appuser
@@ -88,4 +95,4 @@ EXPOSE 7860
 EXPOSE 8000
 
 # Comando por defecto
-CMD ["python", "src/app.py"]
+ENTRYPOINT ["/app/entrypoint.sh"]

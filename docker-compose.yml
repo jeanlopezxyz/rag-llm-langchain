@@ -1,4 +1,4 @@
-# docker-compose.yml - Configuración para Podman con PostgreSQL existente
+# docker-compose.yml - Configuración para Podman
 version: '3.8'
 
 services:
@@ -13,29 +13,15 @@ services:
       - "8000:8000"  # Métricas Prometheus
     env_file:
       - .env
-    # environment:
-    #   # FIX: Configurar fallback explícito a FAISS
-    #   - DB_TYPE=FAISS
-    #   # Configuración PostgreSQL (opcional si está disponible)
-    #   - PGVECTOR_HOST=rag-llm-embedding_postgres-source_1
-    #   - PGVECTOR_PORT=5432
-    #   - PGVECTOR_DATABASE=vectordb
-    #   - PGVECTOR_USER=postgres
-    #   - PGVECTOR_PASSWORD=your_password_here
-    #   - PGVECTOR_COLLECTION_NAME=embeddings
-    #   # Variables adicionales para evitar errores
-    #   - PYTHONPATH=/app/src
-    #   - PYTHONDONTWRITEBYTECODE=1
-    #   - PYTHONUNBUFFERED=1
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./assets:/app/assets
       - ./data:/app/data:ro
       - ./logs:/app/logs
-    # Conectar a la red donde está PostgreSQL (sin extra_hosts)
+      - ./cache:/app/.cache  # Cache para HuggingFace
+    # Opción 1: Usar host network para acceso completo
     networks:
-      - evento-network
-      - rag-llm-embedding_default
+      - network_llm
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860"]
@@ -51,14 +37,10 @@ services:
     image: redis:7-alpine
     container_name: evento-speaker-redis
     restart: unless-stopped
-    ports:
-      - "6380:6379"  # Puerto diferente para evitar conflictos
-    volumes:
-      - redis_data:/data
     networks:
-      - evento-network
+      - network_llm
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -72,23 +54,7 @@ volumes:
   redis_data:
     driver: local
 
-# ==========================================
-# REDES
-# ==========================================
 networks:
-  evento-network:
-    driver: bridge
-  # Red externa donde está PostgreSQL (debe existir)
-  rag-llm-embedding_default:
+  network_llm:
     external: true
-
-# ==========================================
-# NOTAS IMPORTANTES
-# ==========================================
-# 1. La aplicación se conecta a rag-llm-embedding_postgres-source_1:5432
-# 2. Usa la red externa rag-llm-embedding_default donde está PostgreSQL
-# 3. Los embeddings ya están poblados por otro proyecto
-# 4. Esta app solo CONSUME los embeddings para RAG
-# 5. Redis es opcional, solo para cache de aplicación
-# 6. NO usar extra_hosts con Podman - usar nombres de contenedor directamente
-# 7. FIX: DB_TYPE=FAISS como fallback cuando PostgreSQL no esté disponible
+    name: llm

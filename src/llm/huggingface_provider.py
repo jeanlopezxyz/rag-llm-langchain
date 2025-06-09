@@ -1,49 +1,60 @@
-# src/llm/huggingface_provider.py
+# src/vector_db/pgvector_provider.py
 
-from typing import Optional, Tuple
-import inspect
 import os
-from queue import Queue
-from langchain.llms.base import LLM
-# 1. Cambia la importación. Ya no necesitas tu clase local.
-from langchain_huggingface import HuggingFaceEndpoint
-from llm.llm_provider import LLMProvider
+from typing import Optional
+from langchain_postgres import PGVector
+from langchain_core.vectorstores import VectorStoreRetriever
+from vector_db.db_provider import DBProvider
+import logging
 
-class HuggingFaceProvider(LLMProvider):
-  
-    def __init__(self, provider, model, params):
-        super().__init__(provider, model, params)
-        pass
+logger = logging.getLogger(__name__)
 
-    def _tgi_llm_instance(self, callback) -> LLM:
-        print(f"[{inspect.stack()[0][3]}] Creating Hugging Face Endpoint LLM instance")
+class PGVectorProvider(DBProvider):
+    """
+    Proveedor estándar de PGVector que se conecta a las tablas gestionadas por LangChain.
+    """
+    type = "PGVECTOR"
+    url: Optional[str] = None
+    collection_name: Optional[str] = None
+    retriever: Optional[VectorStoreRetriever] = None
+    db: Optional[PGVector] = None
+    
+    def __init__(self):
+        super().__init__()
+        # Construimos la URL a partir de las variables de entorno
+        host = os.getenv('PGVECTOR_HOST', 'localhost')
+        port = os.getenv('PGVECTOR_PORT', '5432')
+        database = os.getenv('PGVECTOR_DATABASE', 'vectordb')
+        user = os.getenv('PGVECTOR_USER', 'postgres')
+        password = os.getenv('PGVECTOR_PASSWORD', 'password')
+        self.url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 
-        inference_server_url = self._get_llm_url("")
+        self.collection_name = os.getenv('PGVECTOR_COLLECTION_NAME', 'embeddings')
         
-        # 2. Adapta los parámetros a la nueva clase HuggingFaceEndpoint
-        params: dict = {
-            "endpoint_url": inference_server_url,
-            "temperature": 0.7,
-            "top_k": 10,
-            "top_p": 0.95,
-            "repetition_penalty": 1.03,
-            "max_new_tokens": 1024,
-            "streaming": True,
-            "callbacks": [callback]
-        }
+        if not all([host, database, user, password]):
+            raise ValueError("Faltan una o más variables de entorno de PGVECTOR (HOST, DATABASE, USER, PASSWORD)")
         
-        if self.model_config and hasattr(self.model_config, 'params') and self.model_config.params:
-            for param_name, param_value in self.model_config.params.items():
-                if param_name in params:
-                    params[param_name] = param_value
-                    print(f"   Aplicando parámetro personalizado: {param_name} = {param_value}")
+        logger.info(f"✅ PGVectorProvider (Estándar) inicializado para la colección '{self.collection_name}'.")
 
-        # 3. Usa la nueva clase
-        self._llm_instance = HuggingFaceEndpoint(**params)
+    @classmethod
+    def _get_type(cls) -> str:
+        """Returns type of the db provider"""
+        return cls.type
+    
+    def get_retriever(self) -> VectorStoreRetriever:
+        """
+        Crea un recuperador estándar de LangChain que lee de las tablas
+        'langchain_pg_collection' y 'langchain_pg_embedding'.
+        """
+        if self.retriever is None:
+            self.db = PGVector(
+                connection=self.url,
+                collection_name=self.collection_name,
+                embeddings=self.get_embeddings()
+            )
 
-        print(f"[{inspect.stack()[0][3]}] Hugging Face Endpoint LLM instance {self._llm_instance}")
-        print(f"Params: {params}")
-        return self._llm_instance
-
-    def get_llm(self, callback) -> LLM:
-        return self._tgi_llm_instance(callback)
+            self.retriever = self.db.as_retriever(
+                            search_type="similarity",
+                            search_kwargs={"k": 4})
+         
+        return self.retriever

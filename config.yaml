@@ -1,7 +1,7 @@
 # config.yaml - Configurado para modelo LLaMA local
 llm_providers:
   - name: "Hugging Face"
-    url: "http://localhost:52088/v1"
+    url: "http://host.containers.internal:52088/v1"
     enabled: true
     models:
       - name: "ibm-granite-granite-3.3-8b-instruct-GGUF"
@@ -14,7 +14,7 @@ llm_providers:
             value: 1024
           - name: "top_p"
             value: 0.9
-
+            
   - name: "OpenAI"
     url: "https://api.openai.com/v1"
     enabled: false

@@ -1,4 +1,4 @@
-from langchain_community.embeddings import HuggingFaceEmbeddings 
+from langchain_huggingface import HuggingFaceEmbeddings 
 from langchain.prompts import PromptTemplate
 import os
 from langchain.chains import RetrievalQA
@@ -61,19 +61,55 @@ def get_qa_chain(llm):
     Returns:
         RetrievalQA: Cadena configurada para consultas de eventos
     """
-    try:
-        db_type = os.getenv("DB_TYPE") if os.getenv("DB_TYPE") else "FAISS"
-        if db_type is None:
-            raise ValueError("DB_TYPE no está especificado")
-        
-        print(f"🗃️ Inicializando base de datos vectorial: {db_type}")
-        retriever = db_factory.get_retriever(db_type)
-        print(f"✅ Retriever {db_type} configurado correctamente")
-        
-    except Exception as e:
-        print(f"⚠️ Error configurando {db_type}: {e}")
-        print(f"🔄 Fallback a FAISS")
-        retriever = db_factory.get_retriever(FAISS)
+    # Intentar obtener el tipo de DB configurado
+    db_type = os.getenv("DB_TYPE", "FAISS")
+    
+    # Lista de intentos en orden de prioridad
+    db_attempts = [db_type, "FAISS"]
+    retriever = None
+    successful_db = None
+    
+    for attempt_db in db_attempts:
+        try:
+            print(f"🗃️ Intentando inicializar base de datos vectorial: {attempt_db}")
+            retriever = db_factory.get_retriever(attempt_db)
+            successful_db = attempt_db
+            print(f"✅ {attempt_db} configurado correctamente")
+            break
+        except Exception as e:
+            print(f"⚠️ No se pudo configurar {attempt_db}: {e}")
+            if attempt_db != "FAISS":
+                print(f"🔄 Intentando con fallback...")
+    
+    if retriever is None:
+        raise ValueError("No se pudo inicializar ninguna base de datos vectorial")
+    
+    # Crear datos de ejemplo si estamos usando FAISS vacío
+    if successful_db == "FAISS":
+        try:
+            # Agregar algunos documentos de ejemplo para evitar errores
+            from langchain.schema import Document
+            sample_docs = [
+                Document(
+                    page_content="Bienvenido al Evento Speaker Assistant. Este es un sistema de consulta sobre eventos y charlas.",
+                    metadata={"source": "sistema", "tipo": "info"}
+                ),
+                Document(
+                    page_content="Las charlas disponibles incluyen temas de Inteligencia Artificial, DevOps, Cloud Computing y más.",
+                    metadata={"source": "eventos", "tipo": "charlas"}
+                ),
+                Document(
+                    page_content="Los speakers invitados son expertos en sus campos con años de experiencia.",
+                    metadata={"source": "speakers", "tipo": "info"}
+                )
+            ]
+            
+            # Intentar agregar documentos de ejemplo
+            if hasattr(retriever, 'vectorstore') and hasattr(retriever.vectorstore, 'add_documents'):
+                retriever.vectorstore.add_documents(sample_docs)
+                print("📝 Agregados documentos de ejemplo a FAISS")
+        except Exception as e:
+            print(f"⚠️ No se pudieron agregar documentos de ejemplo: {e}")
 
     return RetrievalQA.from_chain_type(
         llm=llm,

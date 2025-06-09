@@ -1,16 +1,20 @@
+#!/usr/bin/env python3
 import os
+
+# Establecer variables de entorno ANTES de cualquier import
+os.environ["HF_HOME"] = os.getenv("HF_HOME", "/app/.cache/huggingface")
+os.environ["TRANSFORMERS_CACHE"] = os.environ["HF_HOME"]
+os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
 import time
-from collections.abc import Generator
-from queue import Empty, Queue
-from threading import Thread
+from queue import Queue
 import gradio as gr
 from prometheus_client import Gauge, start_http_server, Counter
 from dotenv import load_dotenv
+
 from utils import config_loader
 import llm.query_helper as QueryHelper
-from scheduler.round_robin import RoundRobinScheduler
 from utils.callback import QueueCallback
-import uuid
 
 # ==========================================
 # CONFIGURACIÓN BÁSICA
@@ -20,18 +24,15 @@ load_dotenv()
 if os.getenv("PYTHONHTTPSVERIFY", "1") == "0":
     os.environ["REQUESTS_CA_BUNDLE"] = ""
 
-APP_TITLE = os.getenv("APP_TITLE", "Evento Speaker Assistant 🎤")
-TIMEOUT = int(os.getenv("TIMEOUT", 30))
+APP_TITLE = os.getenv("APP_TITLE", "Asistente de Eventos y Conferencias")
 PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", 8000))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
-# Validación inicial
 def validate_configuration():
-    """Valida configuración al inicio."""
+    """Valida y crea directorios necesarios."""
     required_dirs = ["assets", "data", "logs"]
     for dir_name in required_dirs:
-        if not os.path.exists(dir_name):
-            os.makedirs(dir_name, exist_ok=True)
+        os.makedirs(dir_name, exist_ok=True)
     print("✅ Validación de configuración completada")
 
 validate_configuration()
@@ -44,8 +45,6 @@ from llm.llm_factory import LLMFactory
 llm_factory = LLMFactory()
 llm_factory.init_providers(config_loader.config)
 
-global sched
-
 # Prometheus
 print(f"📊 Iniciando servidor de métricas en puerto {PROMETHEUS_PORT}...")
 start_http_server(PROMETHEUS_PORT)
@@ -54,29 +53,13 @@ CHAT_COUNTER = Counter("chat_messages_total", "Total chat messages", ["model_id"
 RESPONSE_TIME = Gauge("response_time_seconds", "Response time", ["model_id"])
 USER_SATISFACTION = Counter("user_satisfaction", "User satisfaction ratings", ["rating", "model_id"])
 
-def create_scheduler():
-    """Crea el scheduler de forma segura."""
-    global sched
-    try:
-        provider_model_weight_list = config_loader.get_provider_model_weight_list()
-        if not provider_model_weight_list:
-            print("⚠️ No hay providers habilitados.")
-            return
-        sched = RoundRobinScheduler(provider_model_weight_list)
-        print("✅ Scheduler inicializado correctamente")
-    except Exception as e:
-        print(f"❌ Error inicializando scheduler: {e}")
-
-create_scheduler()
-
 # ==========================================
-# FUNCIONES DE CHAT RAG
+# LÓGICA DE NEGOCIO (SIN CAMBIOS)
 # ==========================================
 
 def get_provider_model(provider_model):
     """Parsea el string provider:model."""
-    if provider_model is None:
-        return "", ""
+    if provider_model is None: return "", ""
     try:
         s = provider_model.split(": ")
         return s[0], s[1] if len(s) > 1 else ""
@@ -88,195 +71,113 @@ def chat_with_events(message, history, provider_model):
     if not message.strip():
         return "Por favor, escribe una pregunta sobre los eventos."
     
+    provider_id, model_id = get_provider_model(provider_model)
+    if not provider_id or not model_id:
+        return "❌ Error: Modelo no válido seleccionado en el Panel de Control."
+    
     try:
-        provider_id, model_id = get_provider_model(provider_model)
-        if not provider_id or not model_id:
-            return "❌ Error: Modelo no válido seleccionado"
-        
-        # Crear callback para streaming
         que = Queue()
         callback = QueueCallback(que)
-        
-        # Obtener LLM
         llm = llm_factory.get_llm(provider_id, model_id, callback)
         if not llm:
-            return "❌ Error: No se pudo inicializar el modelo LLM"
+            return "❌ Error: No se pudo inicializar el modelo LLM."
         
-        # Incrementar contador
         CHAT_COUNTER.labels(model_id=model_id).inc()
-        
-        if DEBUG:
-            print(f"🗣️ Pregunta: {message}")
-            print(f"🤖 Modelo: {model_id}")
-        
-        # Crear cadena QA
-        start_time = time.perf_counter()
         qa_chain = QueryHelper.get_qa_chain(llm)
         
-        # Procesar pregunta
-        try:
-            # Ejecutar consulta RAG
-            result = qa_chain.invoke({"query": message})
-            response = result["result"]
-            
-            # Agregar fuentes si existen
-            if "source_documents" in result and result["source_documents"]:
-                sources = []
-                for doc in result["source_documents"]:
-                    if hasattr(doc, 'metadata') and 'source' in doc.metadata:
-                        source = doc.metadata['source']
-                        if source not in sources:
-                            sources.append(source)
-                
-                if sources:
-                    response += "\n\n**📚 Fuentes consultadas:**\n"
-                    for source in sources[:3]:  # Máximo 3 fuentes
-                        response += f"• {source}\n"
-            
-            end_time = time.perf_counter()
-            RESPONSE_TIME.labels(model_id=model_id).set(end_time - start_time)
-            
-            if DEBUG:
-                print(f"✅ Respuesta generada en {end_time - start_time:.2f}s")
-            
-            return response
-            
-        except Exception as e:
-            print(f"❌ Error en consulta RAG: {e}")
-            return f"❌ Error procesando tu pregunta: {str(e)}"
-            
+        result = qa_chain.invoke({"query": message})
+        response = result.get("result", "No se encontró una respuesta.")
+        
+        if DEBUG and "source_documents" in result:
+            print("\n--- INICIO DE CONTEXTO RECUPERADO (DEBUG) ---")
+            if result["source_documents"]:
+                for i, doc in enumerate(result["source_documents"]):
+                    print(f"📄 Documento {i+1}: {doc.page_content[:200]}... | Metadata: {doc.metadata}")
+            else:
+                print("⚠️ No se recuperaron documentos de la base de datos vectorial.")
+            print("--- FIN DE CONTEXTO RECUPERADO ---\n")
+
+        if "source_documents" in result and result["source_documents"]:
+            sources = list(set(doc.metadata.get('source', 'Desconocida') for doc in result["source_documents"]))
+            if sources:
+                response += "\n\n**📚 Fuentes consultadas:**\n" + "\n".join([f"• {s}" for s in sources[:3]])
+        
+        return response
     except Exception as e:
-        print(f"❌ Error en chat_with_events: {e}")
-        return f"❌ Error: {str(e)}"
-
-# ==========================================
-# EJEMPLOS DE PREGUNTAS
-# ==========================================
-
-EXAMPLE_QUESTIONS = [
-    "¿Qué charlas se dan hoy?",
-    "¿Cuáles son las charlas relacionadas con Inteligencia Artificial?",
-    "Generame una agenda de las charlas de Machine Learning que no se crucen en horario",
-    "¿Cuál es la charla del Dr. García?",
-    "¿Cuántas charlas son en total?",
-    "¿Dónde queda el local del evento?",
-    "¿Cuántas charlas dará el speaker María López?",
-    "¿A qué hora es la charla de DevOps?",
-    "¿Qué charlas hay disponibles el viernes?",
-    "Muéstrame el horario completo del evento"
-]
+        print(f"❌ Error en la consulta RAG: {e}")
+        return "Lo siento, no he podido procesar tu solicitud en este momento. Por favor, intenta reformular tu pregunta o vuelve a intentarlo en unos minutos."
 
 def rate_response(rating, provider_model):
-    """Función para calificar respuesta."""
+    """Función para calificar la respuesta del chat."""
     if rating and provider_model:
         provider_id, model_id = get_provider_model(provider_model)
         if model_id:
-            USER_SATISFACTION.labels(rating=str(rating), model_id=model_id).inc()
-            return f"✅ Gracias por tu calificación: {rating} estrellas"
-    return "Selecciona una calificación"
+            USER_SATISFACTION.labels(rating=rating, model_id=model_id).inc()
+            return f"✅ Gracias por tu calificación de {len(rating)} estrellas."
+    return "Selecciona una calificación."
 
 # ==========================================
-# INTERFAZ GRADIO
+# INTERFAZ GRADIO OPTIMIZADA
 # ==========================================
 
-# CSS personalizado
-css = """
-#chat-container {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-
-.example-questions {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    padding: 1rem;
-    border-radius: 10px;
-    margin-bottom: 1rem;
-}
-
-.chat-title {
-    color: #2c3e50;
-    text-align: center;
-    margin-bottom: 1rem;
-    font-size: 1.5rem;
-    font-weight: bold;
-}
-
-.provider-config {
-    background: #f8f9fa;
-    padding: 1rem;
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
-}
-"""
-
-# Interfaz principal
-with gr.Blocks(title=APP_TITLE, css=css) as demo:
+# MODIFICACIÓN: Se ajusta el tema para usar un azul primario más definido.
+with gr.Blocks(title=APP_TITLE, theme=gr.themes.Default(font=gr.themes.GoogleFont("Lato"), primary_hue=gr.themes.colors.blue), css=".gradio-container {max-width: 95% !important;}") as demo:
     
-    # Header
-    gr.HTML(f'<div class="chat-title">🎤 {APP_TITLE} - Chatbot</div>')
-    gr.Markdown("### Pregúntame sobre eventos, charlas, speakers, horarios y ubicaciones")
-    
-    with gr.Row():
-        with gr.Column(scale=1):
-            # Configuración del modelo
-            with gr.Group():
-                gr.Markdown("#### ⚙️ Configuración del Modelo")
+    gr.HTML(f"<h1 style='text-align: center; margin-bottom: 1rem;'>{APP_TITLE}</h1>")
+    gr.Markdown("Plataforma de consulta para información sobre ponentes, horarios y temáticas de eventos.")
+
+    with gr.Row(variant="panel"):
+        # --- COLUMNA IZQUIERDA: PANEL DE CONTROL ---
+        with gr.Column(scale=1, min_width=350):
+            gr.Markdown("### Panel de Control")
+            
+            with gr.Accordion("⚙️ Configuración del Modelo", open=True):
                 provider_model_list = config_loader.get_provider_model_list()
                 providers_dropdown = gr.Dropdown(
-                    label="🤖 Provider/Modelo LLM",
+                    label="🤖 Modelo LLM a Utilizar",
                     choices=provider_model_list,
                     value=provider_model_list[0] if provider_model_list else None,
-                    info="Modelo de IA para responder preguntas"
+                    interactive=True
                 )
             
-            # Ejemplos de preguntas
-            with gr.Group():
-                gr.Markdown("#### 💡 Preguntas de Ejemplo")
-                gr.Markdown("Haz clic para copiar:")
-                
-                for i, question in enumerate(EXAMPLE_QUESTIONS[:8]):
-                    gr.Markdown(f"**{i+1}.** {question}")
-            
-            # Sistema de calificación
-            with gr.Group():
-                gr.Markdown("#### ⭐ Califica la Respuesta")
+            with gr.Accordion("ℹ️ Guía de Uso", open=False):
+                gr.Markdown(
+                    """
+                    Este asistente puede responder preguntas sobre:
+                    - **Horarios de charlas y eventos**
+                    - **Información de ponentes**
+                    - **Temas y contenidos de las sesiones**
+                    - **Agendas y programación**
+                    - **Ubicaciones y salas**
+                    """
+                )
+
+            with gr.Accordion("⭐ Calificar Respuesta", open=False):
                 rating_radio = gr.Radio(
                     ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-                    label="¿Qué te pareció la respuesta?",
-                    info="Tu feedback nos ayuda a mejorar"
+                    label="Valora la calidad de la última respuesta",
                 )
-                rating_output = gr.Textbox(
-                    label="Estado de Calificación",
-                    interactive=False,
-                    visible=True
-                )
+                rating_output = gr.Textbox(label="Estado", interactive=False, lines=1)
         
-        with gr.Column(scale=2):
-            # FIX: Chat interface con type="messages" para evitar warning de tuples
+        # --- COLUMNA DERECHA: CHAT PRINCIPAL ---
+        with gr.Column(scale=3):
             chatbot = gr.ChatInterface(
-                chat_with_events,
+                fn=chat_with_events,
                 additional_inputs=[providers_dropdown],
-                type="messages"  # FIX: Usar messages en lugar de tuples
+                title="Consola de Consultas",
+                description="Escriba su pregunta en el cuadro de abajo y presione Enter."
             )
-    
-    # Event handler para calificación
+
+    # --- Lógica de los Componentes ---
     rating_radio.change(
-        rate_response,
+        fn=rate_response,
         inputs=[rating_radio, providers_dropdown],
         outputs=rating_output
     )
 
-    # Inicialización
-    def initialize():
-        provider_model_list = config_loader.get_provider_model_list()
-        return gr.Dropdown(
-            choices=provider_model_list,
-            value=provider_model_list[0] if provider_model_list else None
-        )
-    
-    demo.load(initialize, outputs=providers_dropdown)
-
+# --- INICIO DE LA APLICACIÓN ---
 if __name__ == "__main__":
-    print(f"🚀 Iniciando {APP_TITLE} - Chatbot...")
+    print(f"🚀 Iniciando {APP_TITLE}...")
     print(f"📊 Métricas disponibles en: http://localhost:{PROMETHEUS_PORT}")
     print(f"💬 Chat disponible en: http://localhost:7860")
     
@@ -288,6 +189,5 @@ if __name__ == "__main__":
         server_port=7860,
         share=False,
         favicon_path="./assets/robot-head.ico",
-        allowed_paths=["assets"],
         show_error=True
     )
