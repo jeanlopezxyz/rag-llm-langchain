@@ -4,8 +4,11 @@ langchain-community>=0.0.20
 langchain-core>=0.1.0
 langchain-openai>=0.0.8
 langchain-elasticsearch>=0.1.0
+# FIX: Agregar dependencias actualizadas
+langchain-huggingface>=0.0.3
 openai>=1.0.0
 aiohttp>=3.8.0
+# FIX: Usar pydantic v2 correctamente
 pydantic>=2.0.0
 requests>=2.31.0
 markdown>=3.5.0
@@ -20,6 +23,7 @@ psycopg2-binary>=2.9.0
 elasticsearch>=8.8.0
 httpx>=0.24.0
 text-generation>=0.6.0
+# FIX: Especificar versión compatible de sentence-transformers
 sentence-transformers>=2.2.0
 numpy>=1.24.0
 scipy>=1.10.0

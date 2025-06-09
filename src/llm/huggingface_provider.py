@@ -48,6 +48,7 @@ class HuggingFaceProvider(LLMProvider):
         self._llm_instance = HuggingFaceTextGenInference(**params)
 
         print(f"[{inspect.stack()[0][3]}] Hugging Face TGI LLM instance {self._llm_instance}")
+        print(f"Params: {params}")
         return self._llm_instance
 
     def get_llm(self, callback) -> LLM:

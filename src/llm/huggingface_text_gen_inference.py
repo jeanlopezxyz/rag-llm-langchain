@@ -8,7 +8,8 @@ from langchain_core.callbacks import (
 )
 from langchain_core.language_models.llms import LLM
 from langchain_core.outputs import GenerationChunk
-from langchain_core.pydantic_v1 import Extra, Field, root_validator
+# FIX: Usar Pydantic v2 correctamente
+from pydantic import Field, field_validator, model_validator, ConfigDict
 from langchain_core.utils import get_pydantic_field_names
 from llm.client import AsyncClient, Client
 
@@ -58,6 +59,9 @@ class HuggingFaceTextGenInference(LLM):
 
     """
 
+    # FIX: Usar ConfigDict en lugar de Config class para Pydantic v2
+    model_config = ConfigDict(extra='forbid', arbitrary_types_allowed=True)
+
     max_new_tokens: int = 512
     """Maximum number of generated tokens"""
     top_k: Optional[int] = None
@@ -97,20 +101,24 @@ class HuggingFaceTextGenInference(LLM):
     """Holds any text-generation-inference server parameters not explicitly specified"""
     model_kwargs: Dict[str, Any] = Field(default_factory=dict)
     """Holds any model parameters valid for `call` not explicitly specified"""
-    client: Any
-    async_client: Any
+    client: Any = None
+    async_client: Any = None
 
-    class Config:
-        """Configuration for this pydantic object."""
-
-        extra = Extra.forbid
-
-    @root_validator(pre=True)
+    # FIX: Usar model_validator en lugar de root_validator para Pydantic v2
+    @model_validator(mode='before')
+    @classmethod
     def build_extra(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """Build extra kwargs from additional params that were passed in."""
+        if not isinstance(values, dict):
+            return values
+            
         all_required_field_names = get_pydantic_field_names(cls)
         extra = values.get("model_kwargs", {})
-        for field_name in list(values):
+        
+        # Create a copy to avoid modifying during iteration
+        values_copy = values.copy()
+        
+        for field_name in list(values_copy.keys()):
             if field_name in extra:
                 raise ValueError(f"Found {field_name} supplied twice.")
             if field_name not in all_required_field_names:
@@ -131,27 +139,32 @@ class HuggingFaceTextGenInference(LLM):
         values["model_kwargs"] = extra
         return values
 
-    @root_validator()
-    def validate_environment(cls, values: Dict) -> Dict:
+    @model_validator(mode='after')
+    def validate_environment(self):
         """Validate that python package exists in environment."""
-
-        try:
-            values["client"] = Client(
-                values["inference_server_url"],
-                timeout=values["timeout"],
-                **values["server_kwargs"],
-            )
-            values["async_client"] = AsyncClient(
-                values["inference_server_url"],
-                timeout=values["timeout"],
-                **values["server_kwargs"],
-            )
-        except ImportError:
-            raise ImportError(
-                "Could not import text_generation python package. "
-                "Please install it with `pip install text_generation`."
-            )
-        return values
+        
+        # FIX: Verificar si los clientes ya están proporcionados
+        if not self.client:
+            try:
+                self.client = Client(
+                    self.inference_server_url,
+                    timeout=self.timeout,
+                    **self.server_kwargs,
+                )
+            except Exception as e:
+                logger.warning(f"Could not create Client: {e}")
+                
+        if not self.async_client:
+            try:
+                self.async_client = AsyncClient(
+                    self.inference_server_url,
+                    timeout=self.timeout,
+                    **self.server_kwargs,
+                )
+            except Exception as e:
+                logger.warning(f"Could not create AsyncClient: {e}")
+                
+        return self
 
     @property
     def _llm_type(self) -> str:
@@ -198,6 +211,11 @@ class HuggingFaceTextGenInference(LLM):
             return completion
 
         invocation_params = self._invocation_params(stop, **kwargs)
+        
+        # FIX: Verificar que client existe antes de usarlo
+        if not self.client:
+            raise ValueError("Client not initialized properly")
+            
         res = self.client.generate(prompt, **invocation_params)
         # remove stop sequences from the end of the generated text
         for stop_seq in invocation_params["stop_sequences"]:
@@ -221,6 +239,11 @@ class HuggingFaceTextGenInference(LLM):
             return completion
 
         invocation_params = self._invocation_params(stop, **kwargs)
+        
+        # FIX: Verificar que async_client existe antes de usarlo
+        if not self.async_client:
+            raise ValueError("AsyncClient not initialized properly")
+            
         res = await self.async_client.generate(prompt, **invocation_params)
         # remove stop sequences from the end of the generated text
         for stop_seq in invocation_params["stop_sequences"]:
@@ -238,6 +261,10 @@ class HuggingFaceTextGenInference(LLM):
         **kwargs: Any,
     ) -> Iterator[GenerationChunk]:
         invocation_params = self._invocation_params(stop, **kwargs)
+
+        # FIX: Verificar que client existe antes de usarlo
+        if not self.client:
+            raise ValueError("Client not initialized properly")
 
         for res in self.client.generate_stream(prompt, **invocation_params):
             # identify stop sequence in generated text, if any
@@ -274,6 +301,10 @@ class HuggingFaceTextGenInference(LLM):
         **kwargs: Any,
     ) -> AsyncIterator[GenerationChunk]:
         invocation_params = self._invocation_params(stop, **kwargs)
+
+        # FIX: Verificar que async_client existe antes de usarlo
+        if not self.async_client:
+            raise ValueError("AsyncClient not initialized properly")
 
         async for res in self.async_client.generate_stream(prompt, **invocation_params):
             # identify stop sequence in generated text, if any

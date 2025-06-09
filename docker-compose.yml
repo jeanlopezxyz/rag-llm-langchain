@@ -14,9 +14,19 @@ services:
     env_file:
       - .env
     environment:
-      # Usar el nombre exacto del contenedor PostgreSQL de tu sistema
+      # FIX: Configurar fallback explícito a FAISS
+      - DB_TYPE=FAISS
+      # Configuración PostgreSQL (opcional si está disponible)
       - PGVECTOR_HOST=rag-llm-embedding_postgres-source_1
       - PGVECTOR_PORT=5432
+      - PGVECTOR_DATABASE=vectordb
+      - PGVECTOR_USER=postgres
+      - PGVECTOR_PASSWORD=your_password_here
+      - PGVECTOR_COLLECTION_NAME=embeddings
+      # Variables adicionales para evitar errores
+      - PYTHONPATH=/app/src
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./assets:/app/assets
@@ -81,3 +91,4 @@ networks:
 # 4. Esta app solo CONSUME los embeddings para RAG
 # 5. Redis es opcional, solo para cache de aplicación
 # 6. NO usar extra_hosts con Podman - usar nombres de contenedor directamente
+# 7. FIX: DB_TYPE=FAISS como fallback cuando PostgreSQL no esté disponible

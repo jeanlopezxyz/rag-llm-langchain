@@ -251,10 +251,11 @@ with gr.Blocks(title=APP_TITLE, css=css) as demo:
                 )
         
         with gr.Column(scale=2):
-            # Chat interface (versión más compatible)
+            # FIX: Chat interface con type="messages" para evitar warning de tuples
             chatbot = gr.ChatInterface(
                 chat_with_events,
-                additional_inputs=[providers_dropdown]
+                additional_inputs=[providers_dropdown],
+                type="messages"  # FIX: Usar messages en lugar de tuples
             )
     
     # Event handler para calificación
