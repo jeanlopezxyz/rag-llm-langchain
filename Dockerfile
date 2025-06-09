@@ -19,8 +19,14 @@ WORKDIR /app
 # Crear directorio para dependencias
 RUN mkdir -p /install
 
-# Copiar requirements y instalar dependencias Python
+# Copiar requirements.txt
 COPY requirements.txt .
+
+# --- CORRECCIÓN AQUÍ ---
+# Actualizar pip a la última versión para eliminar el notice y asegurar compatibilidad.
+RUN pip install --upgrade pip
+
+# Instalar dependencias Python con el pip ya actualizado
 RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
 
 # ===========================

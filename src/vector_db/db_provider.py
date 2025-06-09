@@ -1,6 +1,8 @@
+# src/vector_db/db_provider.py
+
 from typing import Optional
-# FIX: Actualizar import deprecado de HuggingFaceEmbeddings
-from langchain_community.embeddings import HuggingFaceEmbeddings
+# 1. Cambia la importación a la nueva ruta
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStoreRetriever
 
@@ -9,7 +11,7 @@ class DBProvider:
     """
     embeddings: Optional[Embeddings] = None
     def __init__(self) -> None:
-        # FIX: Especificar modelo explícitamente para evitar warning
+        # El resto del código no necesita cambios
         self.embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
