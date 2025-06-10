@@ -17,14 +17,22 @@ import llm.query_helper as QueryHelper
 from utils.callback import QueueCallback
 
 # ==========================================
-# CONFIGURACIÓN BÁSICA
+# CONFIGURACIÓN PARAMETRIZADA
 # ==========================================
 load_dotenv()
 
 if os.getenv("PYTHONHTTPSVERIFY", "1") == "0":
     os.environ["REQUESTS_CA_BUNDLE"] = ""
 
-APP_TITLE = os.getenv("APP_TITLE", "Asistente de Eventos y Conferencias")
+# Variables parametrizadas desde .env
+APP_TITLE = os.getenv("APP_TITLE", "KCD Antigua Guatemala 2025")
+EVENT_NAME = os.getenv("EVENT_NAME", "KCD Antigua Guatemala 2025")
+EVENT_DATE = os.getenv("EVENT_DATE", "14 de junio de 2025")
+EVENT_LOCATION = os.getenv("EVENT_LOCATION", "Centro de Convenciones Antigua, Guatemala")
+EVENT_TIME = os.getenv("EVENT_TIME", "09:00 - 17:00")
+EVENT_DESCRIPTION = os.getenv("EVENT_DESCRIPTION", "Asistente especializado para consultas sobre speakers, horarios y contenido del evento")
+ORGANIZATION = os.getenv("ORGANIZATION", "Cloud Native Community Guatemala")
+
 PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", 8000))
 DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
@@ -33,20 +41,19 @@ def validate_configuration():
     required_dirs = ["assets", "data", "logs"]
     for dir_name in required_dirs:
         os.makedirs(dir_name, exist_ok=True)
-    print("✅ Validación de configuración completada")
+    print("✅ Configuración validada")
 
 validate_configuration()
 
 # Inicialización
-print("🔧 Inicializando configuración...")
+print(f"🔧 Inicializando {EVENT_NAME}...")
 config_loader.init_config()
-print("🤖 Inicializando factory de LLMs...")
 from llm.llm_factory import LLMFactory
 llm_factory = LLMFactory()
 llm_factory.init_providers(config_loader.config)
 
 # Prometheus
-print(f"📊 Iniciando servidor de métricas en puerto {PROMETHEUS_PORT}...")
+print(f"📊 Métricas en puerto {PROMETHEUS_PORT}")
 start_http_server(PROMETHEUS_PORT)
 
 CHAT_COUNTER = Counter("chat_messages_total", "Total chat messages", ["model_id"])
@@ -54,7 +61,7 @@ RESPONSE_TIME = Gauge("response_time_seconds", "Response time", ["model_id"])
 USER_SATISFACTION = Counter("user_satisfaction", "User satisfaction ratings", ["rating", "model_id"])
 
 # ==========================================
-# LÓGICA DE NEGOCIO (SIN CAMBIOS)
+# LÓGICA SIMPLIFICADA
 # ==========================================
 
 def get_provider_model(provider_model):
@@ -67,122 +74,279 @@ def get_provider_model(provider_model):
         return "", ""
 
 def chat_with_events(message, history, provider_model):
-    """Función principal del chatbot RAG."""
+    """Función principal del chatbot."""
     if not message.strip():
-        return "Por favor, escribe una pregunta sobre los eventos."
+        return f"Pregunta sobre el {EVENT_NAME}."
+    
+    # Respuesta directa PRIMERO (sin LLM)
+    direct_answer = QueryHelper.get_direct_answer(message)
+    if direct_answer:
+        print(f"✅ Respuesta directa para: '{message}'")
+        return direct_answer
     
     provider_id, model_id = get_provider_model(provider_model)
     if not provider_id or not model_id:
-        return "❌ Error: Modelo no válido seleccionado en el Panel de Control."
+        return "❌ Error: Selecciona un modelo válido."
     
     try:
+        start_time = time.time()
+        
         que = Queue()
         callback = QueueCallback(que)
         llm = llm_factory.get_llm(provider_id, model_id, callback)
         if not llm:
-            return "❌ Error: No se pudo inicializar el modelo LLM."
+            return "❌ Error: No se pudo inicializar el modelo."
         
         CHAT_COUNTER.labels(model_id=model_id).inc()
+        
+        print(f"🤖 Procesando con {model_id}...")
         qa_chain = QueryHelper.get_qa_chain(llm)
         
         result = qa_chain.invoke({"query": message})
-        response = result.get("result", "No se encontró una respuesta.")
+        response = result.get("result", "No encontré información específica.")
         
-        if DEBUG and "source_documents" in result:
-            print("\n--- INICIO DE CONTEXTO RECUPERADO (DEBUG) ---")
-            if result["source_documents"]:
-                for i, doc in enumerate(result["source_documents"]):
-                    print(f"📄 Documento {i+1}: {doc.page_content[:200]}... | Metadata: {doc.metadata}")
-            else:
-                print("⚠️ No se recuperaron documentos de la base de datos vectorial.")
-            print("--- FIN DE CONTEXTO RECUPERADO ---\n")
-
+        # MEJORA: Formatear respuesta con estructura
         if "source_documents" in result and result["source_documents"]:
-            sources = list(set(doc.metadata.get('source', 'Desconocida') for doc in result["source_documents"]))
-            if sources:
-                response += "\n\n**📚 Fuentes consultadas:**\n" + "\n".join([f"• {s}" for s in sources[:3]])
+            # Intentar formato estructurado para sesiones
+            try:
+                formatted_sessions = QueryHelper.format_session_response(result["source_documents"], message)
+                if formatted_sessions:
+                    # Si hay sesiones formateadas, usarlas
+                    if len(formatted_sessions) == 1:
+                        response = f"📋 **INFORMACIÓN DE LA SESIÓN:**\n\n{formatted_sessions[0]}"
+                    else:
+                        response = f"📋 **SESIONES ENCONTRADAS:**\n\n" + "\n\n---\n\n".join(formatted_sessions)
+                    
+                    # Solo añadir respuesta del LLM si no hay información estructurada suficiente
+                    llm_response = result.get('result', '').strip()
+                    if len(response) < 150 and llm_response and len(llm_response) > 20:
+                        response += f"\n\n💬 **Información adicional:** {llm_response}"
+                else:
+                    # Si no se pudo formatear, usar respuesta del LLM
+                    response = result.get('result', 'No encontré información específica.')
+            except Exception as e:
+                print(f"⚠️ Error en formato estructurado: {e}")
+                # Usar respuesta original del LLM
+                response = result.get('result', 'No encontré información específica.')
+        else:
+            # Sin documentos, usar respuesta del LLM
+            response = result.get('result', 'No encontré información específica.')
+        
+        # Medir tiempo
+        response_time = time.time() - start_time
+        RESPONSE_TIME.labels(model_id=model_id).set(response_time)
+        print(f"⏱️ Respuesta en {response_time:.2f}s")
+        
+        # Log mínimo en DEBUG
+        if DEBUG and "source_documents" in result:
+            print(f"📄 {len(result['source_documents'])} documentos usados")
         
         return response
+        
     except Exception as e:
-        print(f"❌ Error en la consulta RAG: {e}")
-        return "Lo siento, no he podido procesar tu solicitud en este momento. Por favor, intenta reformular tu pregunta o vuelve a intentarlo en unos minutos."
+        print(f"❌ Error: {e}")
+        
+        # Respuesta de fallback parametrizada
+        return f"""❌ Error procesando la consulta.
+
+**Información básica del {EVENT_NAME}:**
+📅 **Fecha:** {EVENT_DATE}
+📍 **Ubicación:** {EVENT_LOCATION}  
+⏰ **Horario:** {EVENT_TIME}
+
+Intenta reformular tu pregunta."""
 
 def rate_response(rating, provider_model):
-    """Función para calificar la respuesta del chat."""
+    """Función para calificar la respuesta."""
     if rating and provider_model:
         provider_id, model_id = get_provider_model(provider_model)
         if model_id:
             USER_SATISFACTION.labels(rating=rating, model_id=model_id).inc()
-            return f"✅ Gracias por tu calificación de {len(rating)} estrellas."
+            return f"✅ Gracias por tu calificación."
     return "Selecciona una calificación."
 
 # ==========================================
-# INTERFAZ GRADIO OPTIMIZADA
+# INTERFAZ LIMPIA Y PARAMETRIZADA
 # ==========================================
 
-# MODIFICACIÓN: Se ajusta el tema para usar un azul primario más definido.
-with gr.Blocks(title=APP_TITLE, theme=gr.themes.Default(font=gr.themes.GoogleFont("Lato"), primary_hue=gr.themes.colors.blue), css=".gradio-container {max-width: 95% !important;}") as demo:
+# CSS personalizado para mejor apariencia
+custom_css = """
+.main-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1.5rem;
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+.event-info {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+}
+
+.config-panel {
+    background: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.chat-container {
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    background: white;
+}
+
+.examples-container {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+}
+"""
+
+with gr.Blocks(
+    title=APP_TITLE,
+    theme=gr.themes.Soft(primary_hue=gr.themes.colors.blue),
+    css=custom_css
+) as demo:
     
-    gr.HTML(f"<h1 style='text-align: center; margin-bottom: 1rem;'>{APP_TITLE}</h1>")
-    gr.Markdown("Plataforma de consulta para información sobre ponentes, horarios y temáticas de eventos.")
+    # Header principal sin duplicación
+    with gr.Row(elem_classes="main-header"):
+        gr.HTML(f"""
+        <div style="text-align: center;">
+            <h1 style="margin: 0; font-size: 2rem;">🎯 {APP_TITLE}</h1>
+            <p style="margin: 0.5rem 0 0 0; opacity: 0.9; font-size: 1.1rem;">{EVENT_DESCRIPTION}</p>
+        </div>
+        """)
 
-    with gr.Row(variant="panel"):
-        # --- COLUMNA IZQUIERDA: PANEL DE CONTROL ---
-        with gr.Column(scale=1, min_width=350):
-            gr.Markdown("### Panel de Control")
+    with gr.Row():
+        # ==========================================
+        # COLUMNA IZQUIERDA: CONFIGURACIÓN
+        # ==========================================
+        with gr.Column(scale=1, min_width=320, elem_classes="config-panel"):
             
-            with gr.Accordion("⚙️ Configuración del Modelo", open=True):
-                provider_model_list = config_loader.get_provider_model_list()
-                providers_dropdown = gr.Dropdown(
-                    label="🤖 Modelo LLM a Utilizar",
-                    choices=provider_model_list,
-                    value=provider_model_list[0] if provider_model_list else None,
-                    interactive=True
-                )
+            # Configuración del modelo
+            gr.Markdown("### ⚙️ Configuración")
             
-            with gr.Accordion("ℹ️ Guía de Uso", open=False):
-                gr.Markdown(
-                    """
-                    Este asistente puede responder preguntas sobre:
-                    - **Horarios de charlas y eventos**
-                    - **Información de ponentes**
-                    - **Temas y contenidos de las sesiones**
-                    - **Agendas y programación**
-                    - **Ubicaciones y salas**
-                    """
-                )
-
+            provider_model_list = config_loader.get_provider_model_list()
+            providers_dropdown = gr.Dropdown(
+                label="🤖 Modelo LLM",
+                choices=provider_model_list,
+                value=provider_model_list[0] if provider_model_list else None,
+                interactive=True
+            )
+            
+            # Información del evento parametrizada
+            gr.Markdown("### 📅 Información del Evento")
+            with gr.Column(elem_classes="event-info"):
+                gr.Markdown(f"""
+                **{EVENT_NAME}**
+                
+                📅 **Fecha:** {EVENT_DATE}
+                📍 **Ubicación:** {EVENT_LOCATION}
+                ⏰ **Horario:** {EVENT_TIME}
+                🏢 **Organiza:** {ORGANIZATION}
+                """)
+            
+            # Guía de uso
+            with gr.Accordion("💡 Guía de Uso", open=False):
+                gr.Markdown(f"""
+                **Puedes preguntar sobre:**
+                
+                📍 **Ubicación del evento**
+                📅 **Fechas y horarios**
+                👥 **Speakers y ponentes**
+                🎯 **Contenido de las charlas**
+                📋 **Crear agendas personalizadas**
+                
+                **Ejemplos:**
+                - "¿Dónde será el {EVENT_NAME}?"
+                - "¿Qué speakers presentan sobre Kubernetes?"
+                - "Crea una agenda de DevOps sin conflictos"
+                """)
+            
+            # Sistema de calificación
             with gr.Accordion("⭐ Calificar Respuesta", open=False):
                 rating_radio = gr.Radio(
                     ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"],
-                    label="Valora la calidad de la última respuesta",
+                    label="Califica la calidad de la respuesta",
                 )
-                rating_output = gr.Textbox(label="Estado", interactive=False, lines=1)
+                rating_output = gr.Textbox(
+                    label="Estado", 
+                    interactive=False, 
+                    lines=1,
+                    show_label=False
+                )
         
-        # --- COLUMNA DERECHA: CHAT PRINCIPAL ---
-        with gr.Column(scale=3):
+        # ==========================================
+        # COLUMNA DERECHA: CHAT
+        # ==========================================
+        with gr.Column(scale=2, elem_classes="chat-container"):
+            
+            # Chat interface sin título duplicado
             chatbot = gr.ChatInterface(
                 fn=chat_with_events,
                 additional_inputs=[providers_dropdown],
-                title="Consola de Consultas",
-                description="Escriba su pregunta en el cuadro de abajo y presione Enter."
+                description=f"Escribe tu pregunta sobre el {EVENT_NAME}"
             )
+            
+            # Ejemplos en acordeón separado
+            with gr.Accordion("💡 Ejemplos de Consultas", open=False, elem_classes="examples-container"):
+                gr.Markdown(f"""
+                **Prueba estas preguntas:**
+                
+                🏢 `¿Dónde será el {EVENT_NAME}?`
+                
+                📅 `¿Cuándo es el evento?`
+                
+                👥 `¿Qué speakers presentan sobre Kubernetes?`
+                
+                📋 `Crea una agenda personalizada de DevOps`
+                
+                🔒 `¿Hay charlas sobre seguridad?`
+                
+                ⏰ `¿Cuál es el horario del evento?`
+                """)
 
-    # --- Lógica de los Componentes ---
+    # ==========================================
+    # FOOTER CON INFORMACIÓN ADICIONAL
+    # ==========================================
+    with gr.Row():
+        gr.Markdown(f"""
+        <div style="text-align: center; padding: 1rem; color: #6c757d; font-size: 0.9rem; border-top: 1px solid #e9ecef; margin-top: 1rem;">
+            💡 <strong>{EVENT_NAME}</strong> • {EVENT_DATE} • {EVENT_LOCATION}<br>
+            Organizado por {ORGANIZATION} • Sistema basado en IA para consultas del evento
+        </div>
+        """)
+
+    # Lógica de componentes
     rating_radio.change(
         fn=rate_response,
         inputs=[rating_radio, providers_dropdown],
         outputs=rating_output
     )
 
-# --- INICIO DE LA APLICACIÓN ---
+# ==========================================
+# INICIO OPTIMIZADO
+# ==========================================
 if __name__ == "__main__":
     print(f"🚀 Iniciando {APP_TITLE}...")
-    print(f"📊 Métricas disponibles en: http://localhost:{PROMETHEUS_PORT}")
-    print(f"💬 Chat disponible en: http://localhost:7860")
+    print(f"📊 Métricas: http://localhost:{PROMETHEUS_PORT}")
+    print(f"💬 Chat: http://localhost:7860")
     
     if DEBUG:
-        print("🔧 Modo DEBUG activado")
+        print("🔧 DEBUG activado")
+    
+    # Estadísticas
+    print(f"📋 Evento: {EVENT_NAME}")
+    print(f"📅 Fecha: {EVENT_DATE}")
+    print(f"📍 Ubicación: {EVENT_LOCATION}")
+    print(f"🤖 Modelos disponibles: {len(config_loader.get_provider_model_list())}")
     
     demo.queue().launch(
         server_name="0.0.0.0",
