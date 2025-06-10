@@ -1,24 +1,33 @@
 # src/vector_db/db_provider.py
 
 from typing import Optional
-# 1. Cambia la importación a la nueva ruta
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStoreRetriever
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DBProvider:
-    """Base class for DB Provider.
-    """
+    """Clase base para proveedores de bases de datos."""
     embeddings: Optional[Embeddings] = None
+    
     def __init__(self) -> None:
-        # El resto del código no necesita cambios
+        # Modelo de embedding unificado
+        embedding_model_name = "sentence-transformers/multi-qa-mpnet-base-dot-v1"
+        
+        # --- MODIFICACIÓN CLAVE ---
+        # Nos aseguramos de que la normalización de embeddings esté activada.
+        # Esto es crucial para que la búsqueda por similitud de coseno funcione correctamente.
+        encode_kwargs = {'normalize_embeddings': True}
+        
+        logger.info(f"✅ Inicializando embeddings con el modelo: {embedding_model_name} (Normalización Activada)")
+        
         self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
+            model_name=embedding_model_name,
+            encode_kwargs=encode_kwargs
         )
-        pass
-
-    def _get_type(self) -> str:
-        pass
+        # --- FIN DE MODIFICACIÓN ---
 
     def get_retriever(self) -> VectorStoreRetriever:
         pass

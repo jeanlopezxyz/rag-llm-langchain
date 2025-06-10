@@ -1,0 +1,8 @@
+/* Tema Azul - Por defecto */
+:root {
+    --primary-color: #667eea;
+    --primary-dark: #5a67d8;
+    --secondary-color: #764ba2;
+    --accent-color: #0ea5e9;
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}

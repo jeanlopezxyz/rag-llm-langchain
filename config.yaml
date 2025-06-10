@@ -1,7 +1,7 @@
 # config.yaml - Configurado para modelo LLaMA local
 llm_providers:
-  - name: "Hugging Face"
-    url: "http://host.containers.internal:52088/v1"
+  - name: "OpenShift AI (vLLM)"
+    url: "http://host.containers.internal:50100/v1"
     enabled: true
     models:
       - name: "ibm-granite-granite-3.3-8b-instruct-GGUF"
@@ -28,6 +28,6 @@ llm_providers:
           - name: "max_new_tokens"
             value: 1024
 
-default_provider: "Hugging Face"
+default_provider: "OpenShift AI (vLLM)"
 default_model: "ibm-granite-granite-3.3-8b-instruct-GGUF"
 type: "all"

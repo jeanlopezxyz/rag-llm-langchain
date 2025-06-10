@@ -1,0 +1,8 @@
+/* Tema Púrpura - Elegante */
+:root {
+    --primary-color: #8b5cf6;
+    --primary-dark: #7c3aed;
+    --secondary-color: #ec4899;
+    --accent-color: #a855f7;
+    --primary-gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+}

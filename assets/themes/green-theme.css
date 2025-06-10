@@ -1,0 +1,8 @@
+/* Tema Verde - Natural */
+:root {
+    --primary-color: #10b981;
+    --primary-dark: #059669;
+    --secondary-color: #3b82f6;
+    --accent-color: #06b6d4;
+    --primary-gradient: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
+}
