@@ -14,11 +14,11 @@ services:
     env_file:
       - .env
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - ./assets:/app/assets
-      - ./data:/app/data:ro
-      - ./logs:/app/logs
-      - ./cache:/app/.cache  # Cache para HuggingFace
+      - ./config.yaml:/app/config.yaml:ro,z
+      - ./assets:/app/assets:z
+      - ./data:/app/data:ro,z
+      - ./logs:/app/logs:z
+      - ./cache:/app/.cache:z
     # Opción 1: Usar host network para acceso completo
     networks:
       - network_llm

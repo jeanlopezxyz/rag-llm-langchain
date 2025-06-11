@@ -14,7 +14,7 @@ llm_providers:
             value: 1024
           - name: "top_p"
             value: 0.9
-            
+
   - name: "OpenAI"
     url: "https://api.openai.com/v1"
     enabled: false
