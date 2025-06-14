@@ -496,3 +496,30 @@
         color: #94a3b8;
     }
 }
+
+/* ===========================
+   Estilos para Botones de Ejemplo
+   =========================== */
+.example-button {
+    /* Quitamos la transformación a mayúsculas */
+    text-transform: none !important;
+    
+    /* Establecemos un grosor de fuente normal (no negrita) */
+    font-weight: 400 !important; 
+    
+    /* Reducimos ligeramente el tamaño de la fuente */
+    font-size: 0.9rem !important;
+    
+    /* Ajustamos el padding para que el botón no sea tan grande */
+    padding: 0.6rem 1rem !important;
+    
+    /* Podemos darle un fondo un poco más sutil */
+    background: #6b7280 !important; /* Un gris neutro */
+    box-shadow: var(--shadow-sm) !important;
+}
+
+.example-button:hover {
+    background: #4b5563 !important; /* Un gris más oscuro al pasar el ratón */
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1) !important;
+}

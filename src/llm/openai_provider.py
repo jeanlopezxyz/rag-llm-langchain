@@ -1,48 +1,43 @@
-from typing import Optional, Tuple
+# src/llm/openshift_ai_vllm.py
+
 import inspect
 from langchain.llms.base import LLM
 from llm.llm_provider import LLMProvider
-from queue import Queue
 import os
+import httpx
 
-class OpenAIProvider(LLMProvider):
+class OpenShiftAIvLLM(LLMProvider):
   def __init__(self, provider, model, params):
     super().__init__(provider, model, params)
-    pass
 
-  def _openai_llm_instance(self, callback) -> LLM:
-    print(f"[{inspect.stack()[0][3]}] Creating OpenAI LLM instance")
+  def _openshift_ai_vllm_instance(self) -> LLM:
+    print(f"[{inspect.stack()[0][3]}] Creating OpenShift AI vLLM instance")
     try:
-        #from langchain.llms import OpenAI
-        from langchain_openai import ChatOpenAI
-    except Exception as e:
-        print(
-            "Missing openai libraries. Openai provider will be unavailable."
-        )
-        raise e
+      from langchain_community.llms.vllm import VLLMOpenAI
+    except ImportError as e:
+      print("Missing vLLM libraries. VLLMOpenAI provider will be unavailable.")
+      raise e
+    
+    creds = self._get_llm_credentials() or "dummy-api-key"
+    os.environ["OPENAI_API_KEY"] = creds
 
-    params: dict = {
-        "base_url": self._get_llm_url("https://api.openai.com/v1"),
-        "openai_api_key": self._get_llm_credentials(),
-        "model": self.model,
-#          "model_kwargs": {},  # TODO: add model args
-        "organization": None,
-        "timeout": None,
-        "cache": None,
-        "streaming": True,
-        "temperature": 0.01,
-        # "top_p": 0.95,
-        "verbose": False,
-        "callbacks": [callback]
+    # Usamos los parámetros pasados durante la inicialización
+    params_dict = {
+        "model_name": self.model,
+        "openai_api_base": self._get_llm_url(""),
+        "temperature": self.params.get("temperature", 0.1),
+        "max_tokens": self.params.get("max_tokens", 1024),
+        "verbose": os.getenv("DEBUG", "false").lower() == "true",
     }
-    os.environ["OPENAI_API_KEY"] =  self._get_llm_credentials()
-      # if self.model_config.params:
-      #   params.update(self.model_config.params)  # override parameters
+    
+    async_client = httpx.AsyncClient(verify=False)
+    http_client = httpx.Client(verify=False)
+    
+    self._llm_instance = VLLMOpenAI(**params_dict, async_client=async_client, http_client=http_client)
 
-    self._llm_instance = ChatOpenAI(**params)
-
-    print(f"[{inspect.stack()[0][3]}] OpenAI LLM instance {self._llm_instance}")
+    print(f"[{inspect.stack()[0][3]}] OpenShift AI vLLM instance created.")
     return self._llm_instance
 
-  def get_llm(self, callback) -> LLM:
-    return self._openai_llm_instance(callback)
+  # Versión final: no acepta argumentos.
+  def get_llm(self) -> LLM:
+    return self._openshift_ai_vllm_instance()

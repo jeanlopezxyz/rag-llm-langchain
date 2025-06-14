@@ -1,99 +1,79 @@
-"""LLM backend libraries loader."""
-
+# src/llm/llm_provider.py
+import os
+from abc import ABC, abstractmethod
 from typing import Optional, Tuple
-from utils import config_loader
 from langchain.llms.base import LLM
+# La siguiente importación es para los type hints, no causa problemas de ejecución
+from utils.config import ProviderConfig, ModelConfig
 
-from utils.config import ProviderConfig
-
-class LLMConfigurationError(Exception):
-    """LLM configuration is wrong."""
-
-
-class MissingProviderError(LLMConfigurationError):
-    """Provider is not specified."""
-
-
-class MissingModelError(LLMConfigurationError):
-    """Model is not specified."""
-
-
-class UnsupportedProviderError(LLMConfigurationError):
-    """Provider is not supported or is unknown."""
-
-
-class ModelConfigMissingError(LLMConfigurationError):
-    """No configuration exists for the requested model name."""
-
-
-class ModelConfigInvalidError(LLMConfigurationError):
-    """Model configuration is not valid."""
-
-
-class LLMProvider:
-    """Load LLM backend.
+class LLMProvider(ABC):
     """
-    _llm_instance: Optional [LLM] = None
-    def __init__(
-        self,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        params: Optional[dict] = None,
-    ) -> None:
-        if provider is None:
-            msg = "Missing provider"
-            print(msg)
-            raise MissingProviderError(msg)
+    Clase base abstracta para todos los proveedores de LLM.
+    Define la interfaz común que deben seguir y proporciona métodos de ayuda
+    para acceder a la configuración.
+    """
+    def __init__(self, provider: str, model: str, params: dict):
+        """
+        Constructor de la clase base.
+        """
         self.provider = provider
-        if model is None:
-            msg = "Missing model"
-            print(msg)
-            raise MissingModelError(msg)
         self.model = model
-        self.provider_config = self._get_provider_config()
-        self.model_config = self.provider_config.models.get(self.model)
+        self.params = params
+        self._llm_instance = None
 
-    
-    def _get_provider_config(self) -> ProviderConfig:
-        cfg = config_loader.llm_config.providers.get(self.provider)
-        if not cfg:
-            msg = f"Unsupported LLM provider {self.provider}"
-            print(msg)
-            raise UnsupportedProviderError(msg)
+    @abstractmethod
+    def get_llm(self) -> LLM:
+        """
+        Método abstracto que las clases hijas deben implementar.
+        Debe devolver una instancia de un LLM compatible con LangChain.
+        """
+        pass
 
-        model = cfg.models.get(self.model)
-        if not model:
-            msg = (
-                f"No configuration provided for model {self.model} under "
-                f"LLM provider {self.provider}"
-            )
-            print(msg)
-            raise ModelConfigMissingError(msg)
-        return cfg
+    # --- MODIFICACIÓN CLAVE ---
+    # Se cambia la sintaxis del type hint para máxima compatibilidad con
+    # diferentes versiones de Python.
+    def _get_llm_config(self) -> Tuple[Optional[ProviderConfig], Optional[ModelConfig]]:
+        """
+        Función de ayuda para obtener la configuración del proveedor y modelo
+        desde el cargador de configuración global.
+        La importación se hace aquí para evitar dependencias circulares.
+        """
+        # Se importa localmente para evitar el ciclo de importación
+        from utils import config_loader
+        return config_loader.get_provider_model(self.provider, self.model)
 
-    def get_llm(self, callback) -> LLM:
-      return None, None
-    
-    def _get_llm_url(self, default: str) -> str:
-        return (
-            self.provider_config.models[self.model].url
-            if self.provider_config.models[self.model].url is not None
-            else (
-                self.provider_config.url
-                if self.provider_config.url is not None
-                else default
-            )
-        )
+    def _get_llm_url(self, default_url: str = "") -> str:
+        """
+        Obtiene la URL del endpoint para el modelo, usando la URL del proveedor
+        como fallback.
+        """
+        provider_cfg, model_cfg = self._get_llm_config()
+        
+        # La URL específica del modelo tiene prioridad
+        if model_cfg and hasattr(model_cfg, 'url') and model_cfg.url:
+            return model_cfg.url
+            
+        # Si no, se usa la URL general del proveedor
+        if provider_cfg and hasattr(provider_cfg, 'url') and provider_cfg.url:
+            return provider_cfg.url
+            
+        return default_url
 
-    def _get_llm_credentials(self) -> str:
-        return (
-            self.provider_config.models[self.model].credentials
-            if self.provider_config.models[self.model].credentials is not None
-            else self.provider_config.credentials
-        )
-    
-    def status(self):
-        """Provide LLM schema as a string containing formatted and indented JSON."""
-        import json
+    # --- MODIFICACIÓN CLAVE ---
+    # Se cambia también aquí para consistencia y compatibilidad.
+    def _get_llm_credentials(self) -> Optional[str]:
+        """
+        Obtiene las credenciales para el modelo, usando las credenciales del
+        proveedor como fallback.
+        """
+        provider_cfg, model_cfg = self._get_llm_config()
 
-        return json.dumps(self.llm.schema_json, indent=4)
+        # Las credenciales específicas del modelo tienen prioridad
+        if model_cfg and hasattr(model_cfg, 'credentials') and model_cfg.credentials:
+            return model_cfg.credentials
+            
+        # Si no, se usan las credenciales generales del proveedor
+        if provider_cfg and hasattr(provider_cfg, 'credentials') and provider_cfg.credentials:
+            return provider_cfg.credentials
+            
+        return None

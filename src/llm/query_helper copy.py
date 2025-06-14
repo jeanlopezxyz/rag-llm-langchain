@@ -20,17 +20,16 @@ from langchain_core.callbacks.manager import CallbackManagerForRetrieverRun
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-EVENT_NAME = os.getenv("EVENT_NAME", "Event KCD")
+EVENT_NAME = os.getenv("EVENT_NAME", "KCD Guatemala 2025")
 
 # Prompt genérico y restrictivo
 GENERIC_PROMPT = """Eres un asistente para responder preguntas sobre eventos.
 
-REGLAS:
-- Solo responde con información exacta del contexto proporcionado.
-- No agregues explicaciones, títulos, saludos ni justificaciones.
-- Si no hay información relevante en el contexto, responde únicamente: "No tengo información disponible".
-- No reformules la pregunta ni generes estructura adicional.
-- Responde de forma breve, clara y sin contenido inventado.
+REGLAS ESTRICTAS:
+- Responde SOLO con la información proporcionada
+- NO inventes ni agregues información
+- Sé conciso y directo
+- Si no tienes la información, di "No tengo esa información"
 
 Contexto:
 {context}

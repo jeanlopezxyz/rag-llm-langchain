@@ -64,15 +64,20 @@ class ProviderConfig():
 class LLMProviders():
     """LLM providers configuration."""
 
-    providers: dict[str, ProviderConfig] = {}
-
-    def __init__(self, data: Optional[dict] = None) -> None:
-        """Initialize configuration and perform basic validation."""
+    def __init__(self, data: Optional[list] = None) -> None:
+        """
+        Initialize configuration and perform basic validation.
+        --- MODIFICACIÓN CLAVE ---
+        'self.providers' se define aquí como un atributo de instancia,
+        asegurando que cada objeto Config tenga su propia lista de proveedores.
+        """
+        self.providers: dict[str, ProviderConfig] = {}
         if data is None:
             return
         for p in data:
             provider = ProviderConfig(p)
-            self.providers[p["name"]] = provider
+            if provider.name: # Asegurarse de que el proveedor tiene un nombre
+                self.providers[provider.name] = provider
  
 class Config():
     """Global service configuration."""

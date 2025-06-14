@@ -1,20 +1,22 @@
 # config.yaml - Configurado para modelo LLaMA local
 llm_providers:
   - name: "OpenShift AI (vLLM)"
-    url: "http://host.containers.internal:50100/v1"
+    url: "http://host.containers.internal:57070/v1"
     enabled: true
     models:
       - name: "ibm-granite-granite-3.3-8b-instruct-GGUF"
         enabled: true
         weight: 1
         params:
+          # --- MODIFICACIÓN: Se reemplaza 'repetition_penalty' por 'frequency_penalty' ---
           - name: "temperature"
-            value: 0.7
+            value: 0.01
           - name: "max_new_tokens"
-            value: 1024
+            value: 512
           - name: "top_p"
-            value: 0.9
-
+            value: 0.95
+          - name: "frequency_penalty"
+            value: 0.5 # Un valor pequeño para penalizar repeticiones
   - name: "OpenAI"
     url: "https://api.openai.com/v1"
     enabled: false
