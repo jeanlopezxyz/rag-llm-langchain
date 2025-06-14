@@ -8,15 +8,16 @@ llm_providers:
         enabled: true
         weight: 1
         params:
-          # --- MODIFICACIÓN: Se reemplaza 'repetition_penalty' por 'frequency_penalty' ---
           - name: "temperature"
-            value: 0.01
+            value: 0.0
           - name: "max_new_tokens"
-            value: 512
+            value: 300
           - name: "top_p"
-            value: 0.95
+            value: 0.9
           - name: "frequency_penalty"
-            value: 0.5 # Un valor pequeño para penalizar repeticiones
+            value: 0.8
+          - name: "presence_penalty"
+            value: 0.5
   - name: "OpenAI"
     url: "https://api.openai.com/v1"
     enabled: false

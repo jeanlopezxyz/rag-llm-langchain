@@ -1,6 +1,7 @@
 # src/app.py
 import os
 import traceback
+import re  # ← AGREGAR ESTA IMPORTACIÓN
 from dotenv import load_dotenv
 import gradio as gr
 from typing import Optional
@@ -17,11 +18,11 @@ from llm.llm_factory import LLMFactory
 
 # Variables globales
 llm_factory: Optional[LLMFactory] = None
-knowledge_base: Optional[QueryHelper.EventKnowledgeBase] = None
+knowledge_base: Optional[QueryHelper.EnhancedEventKnowledgeBase] = None  # ← CAMBIAR TIPO
 CHAT_COUNTER: Optional[Counter] = None
-# ... (otras variables globales)
+RESPONSE_TIME: Optional[Gauge] = None
+USER_SATISFACTION: Optional[Counter] = None
 
-# --- REEMPLAZA ESTA FUNCIÓN ---
 def get_provider_model(provider_model_str: str) -> tuple[str, str]:
     """
     Parsea de forma robusta el string del proveedor/modelo desde el dropdown.
@@ -40,10 +41,9 @@ def get_provider_model(provider_model_str: str) -> tuple[str, str]:
     else:
         # Si no se puede dividir, devuelve valores vacíos para que falle de forma controlada
         return "", ""
-# --- FIN DEL REEMPLAZO ---
 
 def chat_with_events(message: str, history: list, provider_model: str):
-    """Función principal del chat con manejo de errores y logging robusto."""
+    """Función principal del chat con filtrado anti-alucinación mejorado."""
     logging.info(f"Recibida nueva pregunta. Modelo seleccionado: '{provider_model}'. Mensaje: '{message}'")
     if not message or not message.strip():
         yield history
@@ -68,26 +68,78 @@ def chat_with_events(message: str, history: list, provider_model: str):
         
         response = ""
         logging.debug("Iniciando streaming de la respuesta...")
+        
+        # Frases problemáticas que indican estructura innecesaria
+        forbidden_phrases = [
+            "pregunta:", "respuesta:", "consulta del usuario:", "respuesta directa:",
+            "se espera", "se esperan", "el evento se lleva a cabo",
+            "la dirección es", "el enlace es", "https://", "www.", ".com",
+            "123 ", "ejemplo", "example"
+            # REMOVIDO: "presentará una charla titulada" - esta frase puede ser parte de respuestas válidas
+        ]
+        
+        final_response = ""
+        
         for chunk in qa_chain.stream({"input": message}):
             response += chunk
-            history[-1][1] = response
+            
+            # Filtrar en tiempo real SOLO frases muy problemáticas
+            clean_chunk = chunk
+            chunk_lower = chunk.lower()
+            
+            # Detectar SOLO frases que realmente indican estructura problemática
+            contains_forbidden = any(phrase in chunk_lower for phrase in [
+                "pregunta:", "respuesta:", "consulta del usuario:", "respuesta directa:"
+            ])
+            
+            if not contains_forbidden:
+                final_response += clean_chunk
+                history[-1][1] = final_response
+                yield history
+            else:
+                # Si detectamos estructura problemática, parar y limpiar
+                logging.warning(f"Detectada estructura problemática en: {chunk}")
+                break
+        
+        # POST-PROCESAMIENTO: Limpiar respuesta final
+        if final_response:
+            clean_response = final_response.strip()
+            
+            # Remover estructuras de pregunta/respuesta (solo al final, no durante streaming)
+            patterns_to_remove = [
+                r'^Pregunta:.*?Respuesta:\s*',
+                r'^CONSULTA DEL USUARIO:.*?RESPUESTA DIRECTA:\s*',
+                r'Pregunta:.*?Respuesta:\s*',
+            ]
+            
+            for pattern in patterns_to_remove:
+                clean_response = re.sub(pattern, '', clean_response, flags=re.IGNORECASE | re.DOTALL)
+            
+            # Limpiar líneas vacías múltiples
+            clean_response = re.sub(r'\n\s*\n', '\n', clean_response).strip()
+            
+            # NO cortar la respuesta si es larga - dejar que el LLM complete la lista
+            # Solo verificar que la respuesta final no esté vacía
+            if clean_response and len(clean_response.strip()) > 5:
+                history[-1][1] = clean_response
+            else:
+                history[-1][1] = "No disponible."
+                
             yield history
-        logging.info(f"Respuesta generada exitosamente. Longitud: {len(response)} caracteres.")
+        else:
+            history[-1][1] = "No disponible."
+            yield history
+        
+        logging.info(f"Respuesta procesada exitosamente. Longitud final: {len(history[-1][1])} caracteres.")
 
     except Exception as e:
-        # --- CAPTURA DE ERROR MEJORADA ---
-        # Imprime el traceback completo en la consola para depuración
         logging.error("Ha ocurrido una excepción durante el procesamiento del chat:", exc_info=True)
-        # Prepara un mensaje de error claro para el usuario
-        error_type = type(e).__name__
-        error_message = f"❌ Ocurrió un error inesperado.\n\n**Tipo de Error:**\n{error_type}\n\n**Detalle:**\n{str(e)}"
+        error_message = f"❌ Error: {str(e)}"
         history[-1][1] = error_message
         yield history
     finally:
         logging.debug("El procesamiento de la pregunta ha finalizado.")
 
-
-# ... (El resto de tu app.py, como rate_response y el bloque if __name__ == "__main__", permanece igual)
 def rate_response(rating: str, provider_model: str):
     if rating and provider_model:
         _, model_id = get_provider_model(provider_model)
@@ -107,7 +159,7 @@ if __name__ == "__main__":
         APP_TITLE = os.getenv("APP_TITLE", "🎤 Asistente de Eventos - KCD Guatemala 2025")
         APP_SUBTITLE = os.getenv("APP_SUBTITLE", "Consulta sobre charlas, ponentes, horarios y más")
         
-        # ... El resto de la inicialización ...
+        # Inicializar métricas
         start_http_server(int(os.getenv("PROMETHEUS_PORT", 8000)))
         CHAT_COUNTER = Counter("chat_messages_total", "Total de mensajes", ["model_id"])
         RESPONSE_TIME = Gauge("tiempo_de_respuesta_segundos", "Tiempo de respuesta", ["model_id"])
@@ -122,6 +174,7 @@ if __name__ == "__main__":
         knowledge_base = QueryHelper.initialize_knowledge_base()
         print("✅ Base de Conocimiento lista.")
 
+        # Interfaz moderna con Gradio 4
         with gr.Blocks(title=APP_TITLE, theme=gr.themes.Soft()) as demo:
             gr.HTML(f"<div style='text-align: center; font-size: 2.2rem; font-weight: 700;'>{APP_TITLE}</div>")
             gr.Markdown(f"<h3 style='text-align: center; color: #4A4A4A;'>{APP_SUBTITLE}</h3>")
@@ -137,11 +190,11 @@ if __name__ == "__main__":
                     with gr.Accordion("📋 Ejemplos de Preguntas", open=True):
                         EXAMPLE_QUESTIONS = [
                             "¿Cuántas charlas son en total?",
-                            "¿Cuándo es el evento?",
-                            "¿Cuál es la dirección del evento?",
                             "¿Qué charlas hay sobre seguridad?",
-                            "¿Qué charla va a dar Sergio Méndez?",
-                            "¿Ya empezó el evento?",
+                            "¿Qué charlas hay sobre IA?",
+                            "¿Qué charla da Jean Paul López?",
+                            "¿A qué hora habla Víctor Castellanos?",
+                            "¿Cuáles son las sesiones de la tarde?",
                         ]
                         example_buttons = [gr.Button(q, elem_classes="example-button") for q in EXAMPLE_QUESTIONS]
                     with gr.Accordion("📝 Calificación de Respuesta", open=False):
@@ -152,22 +205,66 @@ if __name__ == "__main__":
                         rating_output = gr.Textbox(label="Estado", interactive=False, lines=1)
 
                 with gr.Column(scale=2):
-                    chatbot = gr.Chatbot(label="Chat", height=500, bubble_full_width=False)
+                    # Chatbot moderno sin parámetros deprecados
+                    chatbot = gr.Chatbot(
+                        label="Chat", 
+                        height=500,
+                        type="tuples"  # Usar formato de tuples en lugar de messages
+                    )
                     with gr.Row():
-                        textbox = gr.Textbox(show_label=False, placeholder="Escribe tu pregunta aquí...", container=False, scale=7)
+                        textbox = gr.Textbox(
+                            show_label=False, 
+                            placeholder="Escribe tu pregunta aquí...", 
+                            container=False, 
+                            scale=7
+                        )
                         submit_btn = gr.Button("Enviar", variant="primary", scale=1, min_width=0)
 
+            # Eventos
             chat_inputs = [textbox, chatbot, providers_dropdown]
-            textbox.submit(fn=chat_with_events, inputs=chat_inputs, outputs=chatbot).then(lambda: "", outputs=[textbox])
-            submit_btn.click(fn=chat_with_events, inputs=chat_inputs, outputs=chatbot).then(lambda: "", outputs=[textbox])
+            
+            textbox.submit(
+                fn=chat_with_events, 
+                inputs=chat_inputs, 
+                outputs=chatbot
+            ).then(
+                lambda: "", 
+                outputs=[textbox]
+            )
+            
+            submit_btn.click(
+                fn=chat_with_events, 
+                inputs=chat_inputs, 
+                outputs=chatbot
+            ).then(
+                lambda: "", 
+                outputs=[textbox]
+            )
+            
+            # Botones de ejemplo
             for btn in example_buttons:
-                btn.click(fn=lambda q=btn.value: q, inputs=[], outputs=[textbox]).then(fn=chat_with_events, inputs=chat_inputs, outputs=chatbot,).then(lambda: "", outputs=[textbox])
-            rating_radio.change(fn=rate_response, inputs=[rating_radio, providers_dropdown], outputs=rating_output)
+                btn.click(
+                    fn=lambda q=btn.value: q, 
+                    inputs=[], 
+                    outputs=[textbox]
+                ).then(
+                    fn=chat_with_events, 
+                    inputs=chat_inputs, 
+                    outputs=chatbot
+                ).then(
+                    lambda: "", 
+                    outputs=[textbox]
+                )
+            
+            rating_radio.change(
+                fn=rate_response, 
+                inputs=[rating_radio, providers_dropdown], 
+                outputs=rating_output
+            )
 
         print(f"🚀 [main] Iniciando la aplicación. Visita http://0.0.0.0:7860")
         demo.queue().launch(server_name="0.0.0.0", server_port=7860, show_error=True)
 
     except Exception as e:
         logging.error("❌❌❌ Ocurrió un error fatal durante el inicio de la aplicación.", exc_info=True)
-        # Opcional: salir si la inicialización falla
         exit(1)
